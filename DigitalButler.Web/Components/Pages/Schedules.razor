@@ -1,0 +1,147 @@
+@page "/schedules"
+@using DigitalButler.Modules
+@inject DigitalButler.Modules.Repositories.ScheduleRepository Repo
+
+<PageTitle>Schedules</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">Module Update Schedules</h3>
+    <p class="subtitle is-6">Controls how often each source is ingested and how often summaries run.</p>
+</div>
+@if (_updates is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <div class="box">
+        <EditForm Model="this" OnValidSubmit="SaveUpdatesAsync">
+            <div class="table-container">
+                <table class="table is-fullwidth is-striped">
+                    <thead>
+                        <tr><th>Source</th><th>Cron/Interval</th><th>Enabled</th></tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var item in _updates)
+                    {
+                        <tr>
+                            <td style="white-space:nowrap;">@item.Source</td>
+                            <td><InputText @bind-Value="item.CronOrInterval" class="input" /></td>
+                            <td>
+                                <label class="checkbox">
+                                    <InputCheckbox @bind-Value="item.Enabled" />
+                                </label>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+            <div class="buttons">
+                <button class="button is-primary" type="submit">Save Updates</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+<div class="content">
+    <h3 class="title is-3">Summary Schedules</h3>
+</div>
+@if (_summaries is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <div class="box">
+        <EditForm Model="this" OnValidSubmit="SaveSummariesAsync">
+            <div class="table-container">
+                <table class="table is-fullwidth is-striped">
+                    <thead>
+                        <tr><th>Type</th><th>Day</th><th>Time</th><th>Enabled</th></tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var item in _summaries)
+                    {
+                        <tr>
+                            <td>@(item.IsWeekly ? "Weekly" : "Daily")</td>
+                            <td>
+                                @if (item.IsWeekly)
+                                {
+                                    <div class="select">
+                                        <InputSelect @bind-Value="item.DayOfWeek">
+                                            @foreach (var day in Enum.GetValues<DayOfWeek>())
+                                            {
+                                                <option value="@day">@day</option>
+                                            }
+                                        </InputSelect>
+                                    </div>
+                                }
+                            </td>
+                            <td>
+                                <input type="time" class="input" value="@item.Time.ToString("HH:mm")" 
+                                       @onchange="@(e => UpdateTime(item, e.Value?.ToString()))" />
+                            </td>
+                            <td>
+                                <label class="checkbox">
+                                    <InputCheckbox @bind-Value="item.Enabled" />
+                                </label>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+            <div class="buttons">
+                <button class="button is-primary" type="submit">Save Summaries</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+@code {
+    private List<ScheduleConfig>? _updates;
+    private List<SummarySchedule>? _summaries;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _updates = await Repo.GetAllUpdateSchedulesAsync();
+        foreach (var src in Enum.GetValues<ContextSource>())
+        {
+            if (_updates.All(x => x.Source != src))
+            {
+                _updates.Add(new ScheduleConfig { Source = src, CronOrInterval = "0 */1 * * *", Enabled = true });
+            }
+        }
+
+        _summaries = await Repo.GetAllSummarySchedulesAsync();
+        if (!_summaries.Any(x => !x.IsWeekly))
+        {
+            _summaries.Add(new SummarySchedule { IsWeekly = false, Time = new TimeOnly(8, 0), Enabled = true });
+        }
+        if (!_summaries.Any(x => x.IsWeekly))
+        {
+            _summaries.Add(new SummarySchedule { IsWeekly = true, DayOfWeek = DayOfWeek.Monday, Time = new TimeOnly(9, 0), Enabled = true });
+        }
+    }
+
+    private async Task SaveUpdatesAsync()
+    {
+        if (_updates is null) return;
+        await Repo.ReplaceUpdateSchedulesAsync(_updates);
+    }
+
+    private async Task SaveSummariesAsync()
+    {
+        if (_summaries is null) return;
+        await Repo.ReplaceSummarySchedulesAsync(_summaries);
+    }
+
+    private void UpdateTime(SummarySchedule schedule, string? timeString)
+    {
+        if (TimeOnly.TryParse(timeString, out var time))
+        {
+            schedule.Time = time;
+        }
+    }
+}

@@ -1,0 +1,67 @@
+@page "/ai-settings"
+@using DigitalButler.Modules
+@using Microsoft.Extensions.Options
+@inject DigitalButler.Modules.Repositories.AiTaskSettingRepository Repo
+@inject IOptionsSnapshot<AiDefaults> AiDefaultsOptions
+
+<PageTitle>AI Settings</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">AI Settings Per Task</h3>
+    <p class="subtitle is-6">Leave values empty to use env defaults.</p>
+</div>
+@if (_settings is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <div class="box">
+        <EditForm Model="this" OnValidSubmit="SaveAsync">
+            <div class="table-container">
+                <table class="table is-fullwidth is-striped">
+                    <thead>
+                        <tr><th>Task</th><th>Base URL</th><th>Model</th><th>API Key</th></tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var item in _settings)
+                    {
+                        <tr>
+                            <td style="white-space:nowrap;">@item.TaskName</td>
+                            <td><InputText class="input" @bind-Value="item.ProviderUrl" placeholder="@AiDefaultsOptions.Value.BaseUrl" /></td>
+                            <td><InputText class="input" @bind-Value="item.Model" placeholder="@AiDefaultsOptions.Value.Model" /></td>
+                            <td><InputText class="input" @bind-Value="item.ApiKey" placeholder="(env default)" /></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+            <div class="buttons">
+                <button class="button is-primary" type="submit">Save</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+@code {
+    private List<AiTaskSetting>? _settings;
+    private readonly string[] _tasks = new[] { "daily-summary", "weekly-summary", "gmail", "gcal", "personal" };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = await Repo.GetAllAsync();
+        foreach (var task in _tasks)
+        {
+            if (_settings.All(x => x.TaskName != task))
+            {
+                _settings.Add(new AiTaskSetting { TaskName = task });
+            }
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_settings is null) return;
+        await Repo.UpsertManyAsync(_settings);
+    }
+}

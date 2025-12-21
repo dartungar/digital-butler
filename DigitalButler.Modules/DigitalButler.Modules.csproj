@@ -6,4 +6,18 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
+    <ItemGroup>
+        <PackageReference Include="Ical.Net" Version="5.1.4" />
+        <PackageReference Include="MailKit" Version="4.10.0" />
+        <PackageReference Include="Dapper" Version="2.1.35" />
+        <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0-preview.3.24172.4" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0-preview.3.25171.5" />
+        <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.0-preview.3.25171.5" />
+    </ItemGroup>
+
+    <!-- EF migrations are no longer used after switching to Dapper. -->
+    <ItemGroup>
+        <Compile Remove="Migrations/**/*.cs" />
+    </ItemGroup>
+
 </Project>

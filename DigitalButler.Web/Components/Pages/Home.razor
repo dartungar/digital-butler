@@ -1,7 +1,108 @@
 ﻿@page "/"
+@using DigitalButler.Modules
+@inject ContextService ContextService
+@inject IManualSyncRunner ManualSyncRunner
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Dashboard</PageTitle>
 
-<h1>Hello, world!</h1>
+<div class="content">
+    <h3 class="title is-3">Dashboard</h3>
+    <p class="subtitle is-6">Quick access to admin tools and recent context.</p>
+</div>
 
-Welcome to your new app.
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Quick Links</h5>
+    </div>
+    <div class="buttons">
+        <a class="button" href="/context">Context</a>
+        <a class="button" href="/instructions">Instructions</a>
+        <a class="button" href="/schedules">Schedules</a>
+        <a class="button" href="/ai-settings">AI Settings</a>
+        <a class="button" href="/google-calendar">Google Calendar</a>
+        <a class="button" href="/gmail">Gmail</a>
+    </div>
+
+    <div class="block"></div>
+    <div class="buttons">
+        <button class="button is-link" type="button" disabled="@_syncing" @onclick="RunSyncAsync">
+            @if (_syncing)
+            {
+                <span>Syncing…</span>
+            }
+            else
+            {
+                <span>Run sync now</span>
+            }
+        </button>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_syncMessage))
+    {
+        <div class="notification is-info is-light">@_syncMessage</div>
+    }
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Recent Context</h5>
+    </div>
+@if (_recent is null)
+{
+    <p>Loading...</p>
+}
+else if (_recent.Count == 0)
+{
+    <p>No context yet.</p>
+}
+else
+{
+    <div class="table-container">
+        <table class="table is-fullwidth is-striped is-hoverable is-narrow">
+            <thead><tr><th>Source</th><th>Title</th><th>Updated</th></tr></thead>
+            <tbody>
+            @foreach (var item in _recent.Take(10))
+            {
+                <tr>
+                    <td style="white-space:nowrap;">@item.Source</td>
+                    <td>@item.Title</td>
+                    <td style="white-space:nowrap;">@item.UpdatedAt.LocalDateTime</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}
+
+</div>
+
+@code {
+    private List<ContextItem>? _recent;
+
+    private bool _syncing;
+    private string? _syncMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _recent = await ContextService.GetRecentAsync(take: 20);
+    }
+
+    private async Task RunSyncAsync()
+    {
+        _syncing = true;
+        _syncMessage = null;
+        try
+        {
+            var result = await ManualSyncRunner.RunAllAsync();
+            _syncMessage = $"Sync finished in {(result.FinishedAt - result.StartedAt).TotalSeconds:0.#}s. " +
+                           $"Updaters: {result.UpdatersRun}, Failures: {result.Failures}.";
+
+            // refresh dashboard list after sync
+            _recent = await ContextService.GetRecentAsync(take: 50);
+        }
+        finally
+        {
+            _syncing = false;
+        }
+    }
+}

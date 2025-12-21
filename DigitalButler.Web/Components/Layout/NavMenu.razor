@@ -1,29 +1,20 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">DigitalButler.Web</a>
-    </div>
+﻿<div class="top-row">
+    <a class="brand" href="">DigitalButler</a>
 </div>
 
 <input type="checkbox" title="Navigation menu" class="navbar-toggler"/>
 
 <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="nav flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
-            </NavLink>
-        </div>
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="counter">
-                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Counter
-            </NavLink>
-        </div>
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="weather">
-                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Weather
-            </NavLink>
-        </div>
-    </nav>
+    <aside class="menu">
+        <p class="menu-label">Admin</p>
+        <ul class="menu-list">
+            <li><NavLink href="/" Match="NavLinkMatch.All" ActiveClass="is-active">Dashboard</NavLink></li>
+            <li><NavLink href="/context" ActiveClass="is-active">Context</NavLink></li>
+            <li><NavLink href="/instructions" ActiveClass="is-active">Instructions</NavLink></li>
+            <li><NavLink href="/schedules" ActiveClass="is-active">Schedules</NavLink></li>
+            <li><NavLink href="/ai-settings" ActiveClass="is-active">AI Settings</NavLink></li>
+            <li><NavLink href="/google-calendar" ActiveClass="is-active">Google Calendar</NavLink></li>
+            <li><NavLink href="/gmail" ActiveClass="is-active">Gmail</NavLink></li>
+        </ul>
+    </aside>
 </div>

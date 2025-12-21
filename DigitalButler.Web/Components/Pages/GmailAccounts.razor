@@ -1,0 +1,38 @@
+@using DigitalButler.Modules
+@inject Microsoft.Extensions.Options.IOptions<GmailOptions> Gmail
+
+<PageTitle>Gmail</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">Gmail (IMAP)</h3>
+    <p class="subtitle is-6">Gmail ingestion is configured via environment variables (no DB-stored credentials). For Gmail, use an <b>App Password</b>.</p>
+</div>
+
+<div class="box">
+
+<div class="content">
+    <h5 class="title is-5">Config</h5>
+    <p>Set <code>GMAIL_ACCOUNTS</code> as a semicolon-separated list:</p>
+
+    <pre><code>GMAIL_ACCOUNTS="name|username|appPassword[|unreadOnly][|daysBack][|maxMessages];name2|user2|pass2..."</code></pre>
+
+    <p>
+        Current configured value is <b>@(string.IsNullOrWhiteSpace(Gmail.Value.Accounts) ? "(empty)" : "(set)")</b>.
+    </p>
+
+    <h5 class="title is-5">Defaults</h5>
+    <ul>
+        <li>Host: <code>@Gmail.Value.Host</code></li>
+        <li>Port: <code>@Gmail.Value.Port</code></li>
+        <li>Use SSL: <code>@Gmail.Value.UseSsl</code></li>
+        <li>UnreadOnlyDefault: <code>@Gmail.Value.UnreadOnlyDefault</code></li>
+        <li>DaysBackDefault: <code>@Gmail.Value.DaysBackDefault</code></li>
+        <li>MaxMessagesDefault: <code>@Gmail.Value.MaxMessagesDefault</code></li>
+    </ul>
+</div>
+
+</div>
+
+@code {
+    // Intentionally empty; this page is informational only.
+}

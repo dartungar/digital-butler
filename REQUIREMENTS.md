@@ -30,7 +30,7 @@ All context can be:
 App has an admin UI where I can:
 - view and edit stored context
 - set custom instructions for the butler (e.g how each context source should be processed)
-- configure schedule of context updating and daily summary
+- configure schedule of context updating and daily/weekly summaries
 
 Admin UI should be implemented as a web app using Blazor or Razor Pages.
 

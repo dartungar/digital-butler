@@ -6,4 +6,14 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
+    <ItemGroup>
+        <ProjectReference Include="..\DigitalButler.Modules\DigitalButler.Modules.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Telegram.Bot" Version="19.0.0" />
+        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0-preview.3.24172.9" />
+        <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0-preview.3.24172.9" />
+    </ItemGroup>
+
 </Project>

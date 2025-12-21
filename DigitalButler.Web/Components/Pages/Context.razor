@@ -1,0 +1,511 @@
+@page "/context"
+@inject ContextService ContextService
+
+@using DigitalButler.Modules
+
+<PageTitle>Context</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">Context Items</h3>
+    <p class="subtitle is-6">View, add, edit, and delete personal context items.</p>
+</div>
+
+<div class="buttons">
+    <button class="button is-primary" type="button" title="Add" aria-label="Add" @onclick="OpenAdd">
+        <span class="icon" aria-hidden="true">+</span>
+    </button>
+</div>
+
+@if (_items is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <div class="box">
+        <div class="content">
+            <h4 class="title is-4">Recent items</h4>
+            <p class="subtitle is-6">Click a row to edit, or use the actions.</p>
+        </div>
+        <div class="table-container">
+            <table class="table is-fullwidth is-striped is-hoverable">
+                <thead>
+                    <tr>
+                        <th>Source</th>
+                        <th>Title</th>
+                        <th>Body</th>
+                        <th>Date</th>
+                        <th>Timeless</th>
+                        <th>Updated</th>
+                        <th style="width: 1%; white-space: nowrap;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var item in _items)
+                {
+                    <tr style="cursor:pointer;" class="@(_selectedId == item.Id ? "is-selected" : null)" @onclick="() => OpenEdit(item)">
+                        <td>@item.Source</td>
+                        <td>@item.Title</td>
+                        <td style="max-width:520px; white-space:pre-wrap; overflow-wrap:anywhere;">
+                            @if (!string.IsNullOrWhiteSpace(item.Summary))
+                            {
+                                <p><strong>Summary:</strong> @item.Summary</p>
+                            }
+                            <div>@item.Body</div>
+                        </td>
+                        <td>@item.RelevantDate?.LocalDateTime.ToString("g")</td>
+                        <td>@item.IsTimeless</td>
+                        <td>@item.UpdatedAt.LocalDateTime</td>
+                        <td>
+                                <div class="buttons are-small">
+                                <button class="button is-link is-light" type="button" title="Edit" aria-label="Edit"
+                                        @onclick:stopPropagation="true" @onclick="() => OpenEdit(item)">
+                                    <span class="icon" aria-hidden="true">✎</span>
+                                </button>
+                                <button class="button is-danger is-light" type="button" title="Delete" aria-label="Delete"
+                                        @onclick:stopPropagation="true" @onclick="() => OpenDelete(item)">
+                                    <span class="icon" aria-hidden="true">✖</span>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+<div class="modal @(_modalOpen ? "is-active" : null)">
+    <div class="modal-background" @onclick="CloseModal"></div>
+    <div class="modal-card">
+        <header class="modal-card-head">
+            <p class="modal-card-title">@_modalTitle</p>
+            <button class="delete" type="button" aria-label="close" @onclick="CloseModal"></button>
+        </header>
+
+        <section class="modal-card-body">
+            @if (_modalMode == ContextModalMode.Add)
+            {
+                @if (!string.IsNullOrWhiteSpace(_addMessage))
+                {
+                    <div class="notification is-info is-light">@_addMessage</div>
+                }
+
+                <EditForm Model="this" FormName="add-context" OnValidSubmit="AddAsync">
+                    <div class="field">
+                        <label class="label">Title</label>
+                        <div class="control">
+                            <InputText class="input" @bind-Value="_newTitle" />
+                        </div>
+                    </div>
+
+                    <div class="columns">
+                        <div class="column">
+                            <div class="field">
+                                <label class="label">Relevant date</label>
+                                <div class="control">
+                                    <InputDate class="input" TValue="DateTime?" @bind-Value="_newRelevantDate" />
+                                </div>
+                                <p class="help">Leave empty to clear.</p>
+                            </div>
+                        </div>
+                        <div class="column">
+                            <div class="field">
+                                <label class="label">Time</label>
+                                <div class="control">
+                                    <InputText class="input" type="time" @bind-Value="_newRelevantTime" />
+                                </div>
+                                <p class="help">Used only when date is set.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label class="label">Body</label>
+                        <div class="control">
+                            <InputTextArea class="textarea" style="min-height: 140px;" @bind-Value="_newBody" />
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label class="label">Category</label>
+                        <div class="control">
+                            <InputText class="input" @bind-Value="_newCategory" />
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <div class="control">
+                            <label class="checkbox">
+                                <InputCheckbox @bind-Value="_newIsTimeless" />
+                                Timeless
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="buttons">
+                        <button class="button is-primary" type="submit" disabled="@_adding">Save</button>
+                        <button class="button" type="button" @onclick="CloseModal" disabled="@_adding">Cancel</button>
+                    </div>
+                </EditForm>
+            }
+            else if (_modalMode == ContextModalMode.Edit && _edit is not null)
+            {
+                <div class="content">
+                    <p class="subtitle is-6">Selected item: <strong>@_edit.Source</strong></p>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(_saveMessage))
+                {
+                    <div class="notification is-info is-light">@_saveMessage</div>
+                }
+
+                <EditForm Model="this" FormName="edit-context" OnValidSubmit="SaveAsync">
+                    <div class="field">
+                        <label class="label">Title</label>
+                        <div class="control">
+                            <InputText class="input" @bind-Value="_editTitle" />
+                        </div>
+                    </div>
+
+                    <div class="columns">
+                        <div class="column">
+                            <div class="field">
+                                <label class="label">Relevant date</label>
+                                <div class="control">
+                                    <InputDate class="input" TValue="DateTime?" @bind-Value="_editRelevantDate" />
+                                </div>
+                                <p class="help">Leave empty to clear.</p>
+                            </div>
+                        </div>
+                        <div class="column">
+                            <div class="field">
+                                <label class="label">Time</label>
+                                <div class="control">
+                                    <InputText class="input" type="time" @bind-Value="_editRelevantTime" />
+                                </div>
+                                <p class="help">Used only when date is set.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label class="label">Body</label>
+                        <div class="control">
+                            <InputTextArea class="textarea" style="min-height: 180px;" @bind-Value="_editBody" />
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label class="label">Category</label>
+                        <div class="control">
+                            <InputText class="input" @bind-Value="_editCategory" />
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <div class="control">
+                            <label class="checkbox">
+                                <InputCheckbox @bind-Value="_editIsTimeless" />
+                                Timeless
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="buttons">
+                        <button class="button is-primary" type="submit" disabled="@_saving">Save</button>
+                        <button class="button is-danger is-light" type="button" title="Delete" aria-label="Delete" @onclick="BeginDelete" disabled="@_saving">
+                            <span class="icon" aria-hidden="true">✖</span>
+                        </button>
+                        <button class="button" type="button" @onclick="CloseModal" disabled="@_saving">Close</button>
+                    </div>
+                </EditForm>
+            }
+            else if (_modalMode == ContextModalMode.DeleteConfirm && _edit is not null)
+            {
+                <div class="notification is-warning is-light">
+                    <p><strong>Delete this item?</strong> This cannot be undone.</p>
+                    <p class="mt-2">@_edit.Title</p>
+                </div>
+                <div class="buttons">
+                    <button class="button is-danger" type="button" disabled="@_deleting" @onclick="ConfirmDeleteAsync">Delete</button>
+                    <button class="button" type="button" disabled="@_deleting" @onclick="CancelDelete">Cancel</button>
+                </div>
+            }
+        </section>
+    </div>
+</div>
+
+@code {
+    private List<ContextItem>? _items;
+
+    private Guid? _selectedId;
+    private ContextItem? _edit;
+    private string _editTitle = string.Empty;
+    private string _editBody = string.Empty;
+    private string? _editCategory;
+    private bool _editIsTimeless;
+    private DateTime? _editRelevantDate;
+    private string _editRelevantTime = "";
+    private bool _saving;
+    private string? _saveMessage;
+
+    private string _newTitle = "Note";
+    private string _newBody = string.Empty;
+    private string? _newCategory;
+    private bool _newIsTimeless = true;
+    private DateTime? _newRelevantDate;
+    private string _newRelevantTime = "";
+    private bool _adding;
+    private string? _addMessage;
+
+    private bool _confirmDelete;
+    private bool _deleting;
+
+    private bool _modalOpen;
+    private ContextModalMode _modalMode;
+    private string _modalTitle = "";
+    private ContextModalMode? _deleteCancelReturnMode;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _items = await ContextService.GetRecentAsync(take: 200);
+    }
+
+    private void Select(ContextItem item)
+    {
+        _selectedId = item.Id;
+        _edit = item;
+        _editTitle = item.Title;
+        _editBody = item.Body;
+        _editCategory = item.Category;
+        _editIsTimeless = item.IsTimeless;
+
+        if (item.RelevantDate is null)
+        {
+            _editRelevantDate = null;
+            _editRelevantTime = "";
+        }
+        else
+        {
+            var local = item.RelevantDate.Value.LocalDateTime;
+            _editRelevantDate = local.Date;
+            _editRelevantTime = local.ToString("HH:mm");
+        }
+
+        _saveMessage = null;
+        _confirmDelete = false;
+    }
+
+    private void OpenAdd()
+    {
+        _modalMode = ContextModalMode.Add;
+        _modalTitle = "Add context item";
+        _modalOpen = true;
+        _addMessage = null;
+        _deleteCancelReturnMode = null;
+    }
+
+    private void OpenEdit(ContextItem item)
+    {
+        Select(item);
+        _modalMode = ContextModalMode.Edit;
+        _modalTitle = "Edit context item";
+        _modalOpen = true;
+        _confirmDelete = false;
+        _deleteCancelReturnMode = null;
+    }
+
+    private void OpenDelete(ContextItem item)
+    {
+        Select(item);
+        _modalMode = ContextModalMode.DeleteConfirm;
+        _modalTitle = "Delete context item";
+        _modalOpen = true;
+        _deleteCancelReturnMode = null;
+    }
+
+    private void CloseModal()
+    {
+        _modalOpen = false;
+        _confirmDelete = false;
+        _saveMessage = null;
+        _addMessage = null;
+        _deleteCancelReturnMode = null;
+    }
+
+    private bool TryBuildRelevantDate(DateTime? date, string timeText, out DateTimeOffset? relevantDate, out string? error)
+    {
+        relevantDate = null;
+        error = null;
+
+        if (date is null)
+        {
+            return true;
+        }
+
+        var text = string.IsNullOrWhiteSpace(timeText) ? "00:00" : timeText;
+        if (!TimeOnly.TryParse(text, out var time))
+        {
+            error = "Invalid time. Use HH:mm.";
+            return false;
+        }
+
+        var d = date.Value;
+        var localDateTime = new DateTime(d.Year, d.Month, d.Day, time.Hour, time.Minute, 0, DateTimeKind.Local);
+        relevantDate = new DateTimeOffset(localDateTime);
+        return true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_edit is null) return;
+
+        if (!TryBuildRelevantDate(_editRelevantDate, _editRelevantTime, out var relevantDate, out var error))
+        {
+            _saveMessage = error;
+            return;
+        }
+
+        _saving = true;
+        _saveMessage = null;
+        try
+        {
+            var ok = await ContextService.UpdateAsync(
+                id: _edit.Id,
+                title: _editTitle,
+                body: _editBody,
+                category: _editCategory,
+                isTimeless: _editIsTimeless,
+                relevantDate: relevantDate
+            );
+
+            if (_items is not null)
+            {
+                var row = _items.FirstOrDefault(x => x.Id == _edit.Id);
+                if (row is not null)
+                {
+                    row.Title = _editTitle;
+                    row.Body = _editBody;
+                    row.Category = _editCategory;
+                    row.IsTimeless = _editIsTimeless;
+                    row.RelevantDate = relevantDate;
+                    row.UpdatedAt = DateTimeOffset.UtcNow;
+                }
+            }
+
+            _saveMessage = ok ? "Saved." : "Nothing updated (item not found).";
+
+            if (ok)
+            {
+                _modalOpen = false;
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task AddAsync()
+    {
+        _addMessage = null;
+        if (string.IsNullOrWhiteSpace(_newBody))
+        {
+            _addMessage = "Body is required.";
+            return;
+        }
+
+        if (!TryBuildRelevantDate(_newRelevantDate, _newRelevantTime, out var relevantDate, out var error))
+        {
+            _addMessage = error;
+            return;
+        }
+
+        _adding = true;
+        try
+        {
+            var added = await ContextService.AddPersonalAsync(
+                body: _newBody,
+                title: _newTitle,
+                relevantDate: relevantDate,
+                isTimeless: _newIsTimeless,
+                category: _newCategory
+            );
+
+            _items ??= new List<ContextItem>();
+            _items.Insert(0, added);
+
+            _newBody = string.Empty;
+            _addMessage = "Added.";
+            _modalOpen = false;
+        }
+        finally
+        {
+            _adding = false;
+        }
+    }
+
+    private void BeginDelete()
+    {
+        if (_edit is null) return;
+        _deleteCancelReturnMode = _modalMode;
+        _modalMode = ContextModalMode.DeleteConfirm;
+        _modalTitle = "Delete context item";
+    }
+
+    private void RequestDelete(ContextItem item)
+    {
+        OpenDelete(item);
+    }
+
+    private void CancelDelete()
+    {
+        if (_deleteCancelReturnMode is null)
+        {
+            _modalOpen = false;
+        }
+        else
+        {
+            _modalMode = _deleteCancelReturnMode.Value;
+            _modalTitle = _modalMode == ContextModalMode.Edit ? "Edit context item" : _modalTitle;
+        }
+
+        _deleteCancelReturnMode = null;
+        _confirmDelete = false;
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_edit is null) return;
+
+        _deleting = true;
+        try
+        {
+            var ok = await ContextService.DeleteAsync(_edit.Id);
+            if (ok && _items is not null)
+            {
+                _items.RemoveAll(x => x.Id == _edit.Id);
+            }
+
+            _saveMessage = ok ? "Deleted." : "Nothing deleted (item not found).";
+            _edit = null;
+            _selectedId = null;
+            _confirmDelete = false;
+            _modalOpen = false;
+            _deleteCancelReturnMode = null;
+        }
+        finally
+        {
+            _deleting = false;
+        }
+    }
+
+    private enum ContextModalMode
+    {
+        Add,
+        Edit,
+        DeleteConfirm
+    }
+}
