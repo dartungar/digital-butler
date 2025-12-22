@@ -72,6 +72,12 @@ public sealed class ButlerSchemaInitializer
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS AppSettings (
+                Key TEXT NOT NULL PRIMARY KEY,
+                Value TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL
+            );
             """
         );
 

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Telegram.Bot;
 using Telegram.Bot.Types.Enums;
+using Telegram.Bot.Types.ReplyMarkups;
 using Polling = Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 
@@ -125,10 +126,17 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         var contextService = scope.ServiceProvider.GetRequiredService<ContextService>();
         var instructionService = scope.ServiceProvider.GetRequiredService<InstructionService>();
         var summarizer = scope.ServiceProvider.GetRequiredService<ISummarizationService>();
+        var tzService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
 
         if (text.StartsWith("/start", StringComparison.OrdinalIgnoreCase) || text.StartsWith("/help", StringComparison.OrdinalIgnoreCase))
         {
-            await bot.SendTextMessageAsync(chatId, "Commands:\n/summary - get current summary\n/add <text> - add personal context\n/sync - run all ingests now", cancellationToken: ct);
+            await SendWithKeyboardAsync(bot, chatId,
+                "Commands:\n" +
+                "/daily - today + timeless\n" +
+                "/weekly - this week + timeless\n" +
+                "/add <text> - add personal context\n" +
+                "/sync - run all ingests now",
+                cancellationToken: ct);
             return;
         }
 
@@ -137,38 +145,170 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             var content = text[4..].Trim();
             if (string.IsNullOrWhiteSpace(content))
             {
-                await bot.SendTextMessageAsync(chatId, "Usage: /add your note", cancellationToken: ct);
+                await SendWithKeyboardAsync(bot, chatId, "Usage: /add your note", cancellationToken: ct);
                 return;
             }
 
             await contextService.AddPersonalAsync(content, ct: ct);
-            await bot.SendTextMessageAsync(chatId, "Saved", cancellationToken: ct);
+            await SendWithKeyboardAsync(bot, chatId, "Saved", cancellationToken: ct);
             return;
         }
 
-        if (text.StartsWith("/summary", StringComparison.OrdinalIgnoreCase))
+        // Backwards compat: /summary behaves like /daily.
+        if (text.StartsWith("/summary", StringComparison.OrdinalIgnoreCase) || text.StartsWith("/daily", StringComparison.OrdinalIgnoreCase))
         {
-            var items = await contextService.GetRelevantAsync(daysBack: 7, take: 100, ct: ct);
-            var sources = items.Select(x => x.Source).Distinct().ToArray();
-            var instructionsBySource = await instructionService.GetBySourcesAsync(sources, ct);
-            var summary = await summarizer.SummarizeAsync(items, instructionsBySource, "on-demand", ct);
-            if (string.IsNullOrWhiteSpace(summary)) summary = "No summary available.";
-            await bot.SendTextMessageAsync(chatId, summary, cancellationToken: ct);
+            await SendWithKeyboardAsync(bot, chatId, "Generating daily summary...", cancellationToken: ct);
+            try
+            {
+                var tz = await tzService.GetTimeZoneInfoAsync(ct);
+                var items = await GetDailyItemsAsync(contextService, tz, ct);
+                var sources = items.Select(x => x.Source).Distinct().ToArray();
+                var instructionsBySource = await instructionService.GetBySourcesAsync(sources, ct);
+                var summary = await summarizer.SummarizeAsync(items, instructionsBySource, "on-demand-daily", ct);
+                if (string.IsNullOrWhiteSpace(summary)) summary = "No summary available.";
+                await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(summary), cancellationToken: ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Host is shutting down.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to generate /daily");
+                var msg = BuildUserFacingError(ex);
+                await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(msg), cancellationToken: ct);
+            }
+            return;
+        }
+
+        if (text.StartsWith("/weekly", StringComparison.OrdinalIgnoreCase))
+        {
+            await SendWithKeyboardAsync(bot, chatId, "Generating weekly summary...", cancellationToken: ct);
+            try
+            {
+                var tz = await tzService.GetTimeZoneInfoAsync(ct);
+                var items = await GetWeeklyItemsAsync(contextService, tz, ct);
+                var sources = items.Select(x => x.Source).Distinct().ToArray();
+                var instructionsBySource = await instructionService.GetBySourcesAsync(sources, ct);
+                var summary = await summarizer.SummarizeAsync(items, instructionsBySource, "on-demand-weekly", ct);
+                if (string.IsNullOrWhiteSpace(summary)) summary = "No summary available.";
+                await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(summary), cancellationToken: ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Host is shutting down.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to generate /weekly");
+                var msg = BuildUserFacingError(ex);
+                await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(msg), cancellationToken: ct);
+            }
+
             return;
         }
 
         if (text.StartsWith("/sync", StringComparison.OrdinalIgnoreCase))
         {
             var runner = scope.ServiceProvider.GetRequiredService<IManualSyncRunner>();
-            await bot.SendTextMessageAsync(chatId, "Running ingests...", cancellationToken: ct);
-            var result = await runner.RunAllAsync(ct);
-            var summary = $"Sync finished in {(result.FinishedAt - result.StartedAt).TotalSeconds:0.#}s. " +
-                          $"Updaters: {result.UpdatersRun}, Failures: {result.Failures}.";
-            await bot.SendTextMessageAsync(chatId, summary + "\n" + string.Join("\n", result.Messages), cancellationToken: ct);
+            await SendWithKeyboardAsync(bot, chatId, "Running ingests...", cancellationToken: ct);
+            try
+            {
+                var result = await runner.RunAllAsync(ct);
+                var summary = $"Sync finished in {(result.FinishedAt - result.StartedAt).TotalSeconds:0.#}s. " +
+                              $"Updaters: {result.UpdatersRun}, Failures: {result.Failures}.";
+                await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(summary + "\n" + string.Join("\n", result.Messages)), cancellationToken: ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Host is shutting down.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to run /sync");
+                await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), cancellationToken: ct);
+            }
             return;
         }
 
-        await bot.SendTextMessageAsync(chatId, "Unknown command. Use /summary or /add <text>", cancellationToken: ct);
+        await SendWithKeyboardAsync(bot, chatId, "Unknown command. Use /daily, /weekly, /add <text>", cancellationToken: ct);
+    }
+
+    private static ReplyKeyboardMarkup BuildKeyboard()
+    {
+        return new ReplyKeyboardMarkup(new[]
+        {
+            new[] { new KeyboardButton("/daily"), new KeyboardButton("/weekly") },
+            new[] { new KeyboardButton("/add ") }
+        })
+        {
+            ResizeKeyboard = true
+        };
+    }
+
+    private static Task SendWithKeyboardAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken cancellationToken)
+    {
+        return bot.SendTextMessageAsync(chatId, text, replyMarkup: BuildKeyboard(), cancellationToken: cancellationToken);
+    }
+
+    private static Task<List<ContextItem>> GetDailyItemsAsync(ContextService contextService, TimeZoneInfo tz, CancellationToken ct)
+    {
+        var nowUtc = DateTimeOffset.UtcNow;
+        var localNow = TimeZoneInfo.ConvertTime(nowUtc, tz);
+
+        var localStart = new DateTime(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, DateTimeKind.Unspecified);
+        var startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, tz);
+        var endUtc = TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), tz);
+
+        // Pull enough rows to avoid a single source starving others.
+        return contextService.GetForWindowAsync(new DateTimeOffset(startUtc, TimeSpan.Zero), new DateTimeOffset(endUtc, TimeSpan.Zero), take: 300, ct: ct);
+    }
+
+    private static Task<List<ContextItem>> GetWeeklyItemsAsync(ContextService contextService, TimeZoneInfo tz, CancellationToken ct)
+    {
+        var nowUtc = DateTimeOffset.UtcNow;
+        var localNow = TimeZoneInfo.ConvertTime(nowUtc, tz);
+
+        var localTodayStart = new DateTime(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, DateTimeKind.Unspecified);
+
+        // Week = Monday..Monday (exclusive), in the configured timezone.
+        var diff = ((7 + (int)localNow.DayOfWeek - (int)DayOfWeek.Monday) % 7);
+        var localWeekStart = localTodayStart.AddDays(-diff);
+        var localWeekEnd = localWeekStart.AddDays(7);
+
+        var weekStartUtc = TimeZoneInfo.ConvertTimeToUtc(localWeekStart, tz);
+        var weekEndUtc = TimeZoneInfo.ConvertTimeToUtc(localWeekEnd, tz);
+
+        return contextService.GetForWindowAsync(new DateTimeOffset(weekStartUtc, TimeSpan.Zero), new DateTimeOffset(weekEndUtc, TimeSpan.Zero), take: 500, ct: ct);
+    }
+
+    private static string TruncateForTelegram(string text, int maxLen = 3500)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= maxLen)
+        {
+            return text;
+        }
+
+        return text[..maxLen] + "\n\n(truncated)";
+    }
+
+    private static string BuildUserFacingError(Exception ex)
+    {
+        // Keep this short; details are in logs.
+        var message = ex.Message;
+        if (message.Contains("insufficient_quota", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("quota", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Summary failed: AI quota exceeded / billing issue (HTTP 429).";
+        }
+
+        if (message.Contains("401", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Summary failed: AI authentication error (check AI_API_KEY).";
+        }
+
+        return $"Summary failed: {message}";
     }
 
     private Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)

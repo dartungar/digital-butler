@@ -1,8 +1,46 @@
 @page "/schedules"
 @using DigitalButler.Modules
 @inject DigitalButler.Modules.Repositories.ScheduleRepository Repo
+@inject TimeZoneService TimeZones
 
 <PageTitle>Schedules</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">Timezone</h3>
+    <p class="subtitle is-6">Summary schedules and date windows use this timezone. Default is UTC.</p>
+
+    @if (!string.IsNullOrWhiteSpace(_tzOverride))
+    {
+        <div class="notification is-warning is-light">
+            Timezone is currently forced by env/config (<strong>Butler:TimeZone</strong>). Admin UI changes won't apply until the override is removed.
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_tzError))
+    {
+        <div class="notification is-danger is-light">@_tzError</div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_tzSaved))
+    {
+        <div class="notification is-success is-light">@_tzSaved</div>
+    }
+
+    <div class="box">
+        <EditForm Model="this" OnValidSubmit="SaveTimezoneAsync">
+            <div class="field">
+                <label class="label">Timezone ID</label>
+                <div class="control">
+                    <InputText class="input" @bind-Value="_timeZoneId" placeholder="UTC (or e.g. Europe/Prague)" />
+                </div>
+                <p class="help">On Linux/Docker, use IANA IDs like <code>Europe/Prague</code>, <code>America/New_York</code>, <code>UTC</code>.</p>
+            </div>
+            <div class="buttons">
+                <button class="button is-primary" type="submit">Save Timezone</button>
+            </div>
+        </EditForm>
+    </div>
+</div>
 
 <div class="content">
     <h3 class="title is-3">Module Update Schedules</h3>
@@ -102,9 +140,16 @@ else
 @code {
     private List<ScheduleConfig>? _updates;
     private List<SummarySchedule>? _summaries;
+    private string _timeZoneId = "UTC";
+    private string? _tzOverride;
+    private string? _tzError;
+    private string? _tzSaved;
 
     protected override async Task OnInitializedAsync()
     {
+        _tzOverride = TimeZones.GetConfiguredTimeZoneIdOverride();
+        _timeZoneId = await TimeZones.GetTimeZoneIdAsync();
+
         _updates = await Repo.GetAllUpdateSchedulesAsync();
         foreach (var src in Enum.GetValues<ContextSource>())
         {
@@ -122,6 +167,26 @@ else
         if (!_summaries.Any(x => x.IsWeekly))
         {
             _summaries.Add(new SummarySchedule { IsWeekly = true, DayOfWeek = DayOfWeek.Monday, Time = new TimeOnly(9, 0), Enabled = true });
+        }
+    }
+
+    private async Task SaveTimezoneAsync()
+    {
+        _tzError = null;
+        _tzSaved = null;
+
+        try
+        {
+            await TimeZones.SetTimeZoneIdAsync(_timeZoneId);
+            _tzSaved = "Saved.";
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            _tzError = "Unknown timezone ID for this OS.";
+        }
+        catch (InvalidTimeZoneException)
+        {
+            _tzError = "Invalid timezone.";
         }
     }
 

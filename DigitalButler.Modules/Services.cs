@@ -34,6 +34,9 @@ public class ContextService
     public Task<List<ContextItem>> GetRelevantAsync(int daysBack = 7, int take = 200, CancellationToken ct = default)
         => _repo.GetRelevantAsync(daysBack, take, ct);
 
+    public Task<List<ContextItem>> GetForWindowAsync(DateTimeOffset windowStartInclusive, DateTimeOffset windowEndExclusive, int take = 200, CancellationToken ct = default)
+        => _repo.GetForWindowAsync(windowStartInclusive, windowEndExclusive, take, ct);
+
     public async Task<bool> UpdateAsync(Guid id, string title, string body, string? category, bool isTimeless, DateTimeOffset? relevantDate, CancellationToken ct = default)
     {
         var item = new ContextItem
@@ -54,6 +57,24 @@ public class ContextService
     {
         return await _repo.DeleteAsync(id, ct) > 0;
     }
+
+    public Task<int> DeleteManyAsync(IEnumerable<Guid> ids, CancellationToken ct = default)
+        => _repo.DeleteManyAsync(ids, ct);
+
+    public Task<int> DeleteByCategoryAsync(string? category, CancellationToken ct = default)
+        => _repo.DeleteByCategoryAsync(category, ct);
+
+    public Task<int> DeleteBySourceAsync(ContextSource source, CancellationToken ct = default)
+        => _repo.DeleteBySourceAsync(source, ct);
+
+    public Task<int> CountByCategoryAsync(string? category, CancellationToken ct = default)
+        => _repo.CountByCategoryAsync(category, ct);
+
+    public Task<int> CountBySourceAsync(ContextSource source, CancellationToken ct = default)
+        => _repo.CountBySourceAsync(source, ct);
+
+    public Task<List<string?>> GetDistinctCategoriesAsync(CancellationToken ct = default)
+        => _repo.GetDistinctCategoriesAsync(ct);
 }
 
 public class InstructionService

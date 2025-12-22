@@ -1,6 +1,9 @@
 ﻿@page "/"
 @using DigitalButler.Modules
 @inject ContextService ContextService
+@inject InstructionService InstructionService
+@inject ISummarizationService Summarizer
+@inject TimeZoneService TimeZoneService
 @inject IManualSyncRunner ManualSyncRunner
 
 <PageTitle>Dashboard</PageTitle>
@@ -35,11 +38,38 @@
                 <span>Run sync now</span>
             }
         </button>
+
+        <button class="button is-primary is-light" type="button" disabled="@_dailyRunning" @onclick="RunDailySummaryAsync">
+            @if (_dailyRunning)
+            {
+                <span>Daily…</span>
+            }
+            else
+            {
+                <span>Test daily</span>
+            }
+        </button>
+
+        <button class="button is-primary is-light" type="button" disabled="@_weeklyRunning" @onclick="RunWeeklySummaryAsync">
+            @if (_weeklyRunning)
+            {
+                <span>Weekly…</span>
+            }
+            else
+            {
+                <span>Test weekly</span>
+            }
+        </button>
     </div>
 
     @if (!string.IsNullOrWhiteSpace(_syncMessage))
     {
         <div class="notification is-info is-light">@_syncMessage</div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_summaryMessage))
+    {
+        <div class="notification is-info is-light" style="white-space:pre-wrap; overflow-wrap:anywhere;">@_summaryMessage</div>
     }
 </div>
 
@@ -82,6 +112,10 @@ else
     private bool _syncing;
     private string? _syncMessage;
 
+    private bool _dailyRunning;
+    private bool _weeklyRunning;
+    private string? _summaryMessage;
+
     protected override async Task OnInitializedAsync()
     {
         _recent = await ContextService.GetRecentAsync(take: 20);
@@ -104,5 +138,71 @@ else
         {
             _syncing = false;
         }
+    }
+
+    private async Task RunDailySummaryAsync()
+    {
+        _dailyRunning = true;
+        _summaryMessage = null;
+        try
+        {
+            var tz = await TimeZoneService.GetTimeZoneInfoAsync();
+            var items = await GetDailyItemsAsync(tz);
+            var sources = items.Select(x => x.Source).Distinct().ToArray();
+            var instructionsBySource = await InstructionService.GetBySourcesAsync(sources);
+            var summary = await Summarizer.SummarizeAsync(items, instructionsBySource, "on-demand-daily", CancellationToken.None);
+            _summaryMessage = string.IsNullOrWhiteSpace(summary) ? "No summary available." : summary;
+        }
+        finally
+        {
+            _dailyRunning = false;
+        }
+    }
+
+    private async Task RunWeeklySummaryAsync()
+    {
+        _weeklyRunning = true;
+        _summaryMessage = null;
+        try
+        {
+            var tz = await TimeZoneService.GetTimeZoneInfoAsync();
+            var items = await GetWeeklyItemsAsync(tz);
+            var sources = items.Select(x => x.Source).Distinct().ToArray();
+            var instructionsBySource = await InstructionService.GetBySourcesAsync(sources);
+            var summary = await Summarizer.SummarizeAsync(items, instructionsBySource, "on-demand-weekly", CancellationToken.None);
+            _summaryMessage = string.IsNullOrWhiteSpace(summary) ? "No summary available." : summary;
+        }
+        finally
+        {
+            _weeklyRunning = false;
+        }
+    }
+
+    private Task<List<ContextItem>> GetDailyItemsAsync(TimeZoneInfo tz)
+    {
+        var nowUtc = DateTimeOffset.UtcNow;
+        var localNow = TimeZoneInfo.ConvertTime(nowUtc, tz);
+
+        var localStart = new DateTime(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, DateTimeKind.Unspecified);
+        var startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, tz);
+        var endUtc = TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), tz);
+
+        return ContextService.GetForWindowAsync(new DateTimeOffset(startUtc, TimeSpan.Zero), new DateTimeOffset(endUtc, TimeSpan.Zero), take: 300);
+    }
+
+    private Task<List<ContextItem>> GetWeeklyItemsAsync(TimeZoneInfo tz)
+    {
+        var nowUtc = DateTimeOffset.UtcNow;
+        var localNow = TimeZoneInfo.ConvertTime(nowUtc, tz);
+
+        var localTodayStart = new DateTime(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, DateTimeKind.Unspecified);
+        var diff = ((7 + (int)localNow.DayOfWeek - (int)DayOfWeek.Monday) % 7);
+        var localWeekStart = localTodayStart.AddDays(-diff);
+        var localWeekEnd = localWeekStart.AddDays(7);
+
+        var weekStartUtc = TimeZoneInfo.ConvertTimeToUtc(localWeekStart, tz);
+        var weekEndUtc = TimeZoneInfo.ConvertTimeToUtc(localWeekEnd, tz);
+
+        return ContextService.GetForWindowAsync(new DateTimeOffset(weekStartUtc, TimeSpan.Zero), new DateTimeOffset(weekEndUtc, TimeSpan.Zero), take: 500);
     }
 }

@@ -14,6 +14,33 @@
     <button class="button is-primary" type="button" title="Add" aria-label="Add" @onclick="OpenAdd">
         <span class="icon" aria-hidden="true">+</span>
     </button>
+
+    <button class="button is-danger is-light" type="button" title="Delete selected" aria-label="Delete selected"
+            disabled="@(_selectedIds.Count == 0)" @onclick="OpenDeleteSelected">
+        <span class="icon" aria-hidden="true">✖</span>
+        <span>Delete selected (@_selectedIds.Count)</span>
+    </button>
+
+    <div class="field has-addons">
+        <div class="control">
+            <div class="select">
+                <select @bind="_deleteSourceText">
+                    <option value="">(Choose source to delete)</option>
+                    @foreach (var s in _sources)
+                    {
+                        <option value="@s">@s</option>
+                    }
+                </select>
+            </div>
+        </div>
+        <div class="control">
+            <button class="button is-danger is-light" type="button" title="Delete all from source" aria-label="Delete all from source"
+                    disabled="@(string.IsNullOrWhiteSpace(_deleteSourceText))" @onclick="OpenDeleteSource">
+                <span class="icon" aria-hidden="true">✖</span>
+                <span>Delete all from source</span>
+            </button>
+        </div>
+    </div>
 </div>
 
 @if (_items is null)
@@ -31,6 +58,11 @@ else
             <table class="table is-fullwidth is-striped is-hoverable">
                 <thead>
                     <tr>
+                        <th style="width: 1%; white-space: nowrap;">
+                            <label class="checkbox" title="Select all visible">
+                                <input type="checkbox" checked="@IsAllVisibleSelected" @onchange="ToggleSelectAllVisible" />
+                            </label>
+                        </th>
                         <th>Source</th>
                         <th>Title</th>
                         <th>Body</th>
@@ -44,6 +76,11 @@ else
                 @foreach (var item in _items)
                 {
                     <tr style="cursor:pointer;" class="@(_selectedId == item.Id ? "is-selected" : null)" @onclick="() => OpenEdit(item)">
+                        <td @onclick:stopPropagation="true">
+                            <label class="checkbox" title="Select">
+                                <input type="checkbox" checked="@_selectedIds.Contains(item.Id)" @onchange="(e) => ToggleSelected(item.Id, e)" />
+                            </label>
+                        </td>
                         <td>@item.Source</td>
                         <td>@item.Title</td>
                         <td style="max-width:520px; white-space:pre-wrap; overflow-wrap:anywhere;">
@@ -233,12 +270,43 @@ else
                     <button class="button" type="button" disabled="@_deleting" @onclick="CancelDelete">Cancel</button>
                 </div>
             }
+            else if (_modalMode == ContextModalMode.DeleteSelectedConfirm)
+            {
+                <div class="notification is-warning is-light">
+                    <p><strong>Delete selected items?</strong> This cannot be undone.</p>
+                    <p class="mt-2">Selected: <strong>@_selectedIds.Count</strong></p>
+                </div>
+                <div class="buttons">
+                    <button class="button is-danger" type="button" disabled="@_deleting" @onclick="ConfirmDeleteSelectedAsync">Delete selected</button>
+                    <button class="button" type="button" disabled="@_deleting" @onclick="CloseModal">Cancel</button>
+                </div>
+            }
+            else if (_modalMode == ContextModalMode.DeleteCategoryConfirm)
+            {
+                <div class="notification is-warning is-light">
+                    <p><strong>Delete all items from source?</strong> This cannot be undone.</p>
+                    <p class="mt-2">Source: <strong>@_deleteSourceText</strong></p>
+                    @if (_deleteSourceCount is not null)
+                    {
+                        <p class="mt-2">Items to delete: <strong>@_deleteSourceCount</strong></p>
+                    }
+                </div>
+                <div class="buttons">
+                    <button class="button is-danger" type="button" disabled="@_deleting" @onclick="ConfirmDeleteSourceAsync">Delete source</button>
+                    <button class="button" type="button" disabled="@_deleting" @onclick="CloseModal">Cancel</button>
+                </div>
+            }
         </section>
     </div>
 </div>
 
 @code {
     private List<ContextItem>? _items;
+
+    private readonly HashSet<Guid> _selectedIds = new();
+    private readonly List<ContextSource> _sources = Enum.GetValues<ContextSource>().OrderBy(s => s.ToString(), StringComparer.Ordinal).ToList();
+    private string? _deleteSourceText;
+    private int? _deleteSourceCount;
 
     private Guid? _selectedId;
     private ContextItem? _edit;
@@ -260,7 +328,6 @@ else
     private bool _adding;
     private string? _addMessage;
 
-    private bool _confirmDelete;
     private bool _deleting;
 
     private bool _modalOpen;
@@ -272,6 +339,43 @@ else
     {
         _items = await ContextService.GetRecentAsync(take: 200);
     }
+
+    private bool IsAllVisibleSelected => _items is not null && _items.Count > 0 && _items.All(i => _selectedIds.Contains(i.Id));
+
+    private void ToggleSelected(Guid id, ChangeEventArgs e)
+    {
+        var isChecked = e.Value as bool?;
+        if (isChecked == true)
+        {
+            _selectedIds.Add(id);
+        }
+        else
+        {
+            _selectedIds.Remove(id);
+        }
+    }
+
+    private void ToggleSelectAllVisible(ChangeEventArgs e)
+    {
+        if (_items is null) return;
+        var isChecked = e.Value as bool?;
+
+        if (isChecked == true)
+        {
+            foreach (var item in _items)
+            {
+                _selectedIds.Add(item.Id);
+            }
+        }
+        else
+        {
+            foreach (var item in _items)
+            {
+                _selectedIds.Remove(item.Id);
+            }
+        }
+    }
+
 
     private void Select(ContextItem item)
     {
@@ -295,7 +399,6 @@ else
         }
 
         _saveMessage = null;
-        _confirmDelete = false;
     }
 
     private void OpenAdd()
@@ -313,7 +416,6 @@ else
         _modalMode = ContextModalMode.Edit;
         _modalTitle = "Edit context item";
         _modalOpen = true;
-        _confirmDelete = false;
         _deleteCancelReturnMode = null;
     }
 
@@ -329,9 +431,31 @@ else
     private void CloseModal()
     {
         _modalOpen = false;
-        _confirmDelete = false;
         _saveMessage = null;
         _addMessage = null;
+        _deleteCancelReturnMode = null;
+        _deleteSourceCount = null;
+    }
+
+    private void OpenDeleteSelected()
+    {
+        if (_selectedIds.Count == 0) return;
+        _modalMode = ContextModalMode.DeleteSelectedConfirm;
+        _modalTitle = "Delete selected";
+        _modalOpen = true;
+        _deleteCancelReturnMode = null;
+    }
+
+    private async Task OpenDeleteSource()
+    {
+        if (string.IsNullOrWhiteSpace(_deleteSourceText)) return;
+        if (!Enum.TryParse<ContextSource>(_deleteSourceText, out var source)) return;
+
+        _deleteSourceCount = await ContextService.CountBySourceAsync(source);
+
+        _modalMode = ContextModalMode.DeleteCategoryConfirm;
+        _modalTitle = "Delete source";
+        _modalOpen = true;
         _deleteCancelReturnMode = null;
     }
 
@@ -473,7 +597,6 @@ else
         }
 
         _deleteCancelReturnMode = null;
-        _confirmDelete = false;
     }
 
     private async Task ConfirmDeleteAsync()
@@ -489,12 +612,67 @@ else
                 _items.RemoveAll(x => x.Id == _edit.Id);
             }
 
+            _selectedIds.Remove(_edit.Id);
+
             _saveMessage = ok ? "Deleted." : "Nothing deleted (item not found).";
             _edit = null;
             _selectedId = null;
-            _confirmDelete = false;
             _modalOpen = false;
             _deleteCancelReturnMode = null;
+        }
+        finally
+        {
+            _deleting = false;
+        }
+    }
+
+    private async Task ConfirmDeleteSelectedAsync()
+    {
+        if (_selectedIds.Count == 0) return;
+
+        _deleting = true;
+        try
+        {
+            var ids = _selectedIds.ToList();
+            var deleted = await ContextService.DeleteManyAsync(ids);
+
+            if (_items is not null)
+            {
+                _items.RemoveAll(x => _selectedIds.Contains(x.Id));
+            }
+
+            _selectedIds.Clear();
+            _modalOpen = false;
+            _deleteCancelReturnMode = null;
+            _saveMessage = deleted > 0 ? $"Deleted {deleted} item(s)." : "Nothing deleted.";
+
+            if (deleted > 0)
+            {
+                // no-op
+            }
+        }
+        finally
+        {
+            _deleting = false;
+        }
+    }
+
+    private async Task ConfirmDeleteSourceAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_deleteSourceText)) return;
+        if (!Enum.TryParse<ContextSource>(_deleteSourceText, out var source)) return;
+
+        _deleting = true;
+        try
+        {
+            var deleted = await ContextService.DeleteBySourceAsync(source);
+
+            // Source delete affects the whole DB, so refresh the visible list.
+            _items = await ContextService.GetRecentAsync(take: 200);
+            _selectedIds.Clear();
+            _modalOpen = false;
+            _deleteSourceCount = null;
+            _saveMessage = deleted > 0 ? $"Deleted {deleted} item(s)." : "Nothing deleted.";
         }
         finally
         {
@@ -506,6 +684,8 @@ else
     {
         Add,
         Edit,
-        DeleteConfirm
+        DeleteConfirm,
+        DeleteSelectedConfirm,
+        DeleteCategoryConfirm
     }
 }

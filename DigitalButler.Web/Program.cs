@@ -14,6 +14,7 @@ using System.Text;
 using DigitalButler.Telegram;
 using DigitalButler.Web;
 using System.IO;
+using System.Text.RegularExpressions;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -55,11 +56,50 @@ MapEnv(envOverrides, "BUTLER_ADMIN_USERNAME", "Auth:Username");
 MapEnv(envOverrides, "BUTLER_ADMIN_PASSWORD", "Auth:Password");
 MapEnv(envOverrides, "BUTLER_ADMIN_PASSWORD_HASH", "Auth:PasswordHash");
 
+MapEnv(envOverrides, "BUTLER_TIMEZONE", "Butler:TimeZone");
+
 MapEnv(envOverrides, "TELEGRAM_CHAT_ID", "Telegram:ChatId");
 
 MapEnv(envOverrides, "GCAL_ICAL_URLS", "GoogleCalendar:IcalUrls");
 MapEnv(envOverrides, "GCAL_FEED1_NAME", "GoogleCalendar:IcalFeeds:0:Name");
 MapEnv(envOverrides, "GCAL_FEED1_URL", "GoogleCalendar:IcalFeeds:0:Url");
+
+// Support GCAL_FEED{N}_NAME / GCAL_FEED{N}_URL (N = 1..n)
+// Example: GCAL_FEED2_NAME -> GoogleCalendar:IcalFeeds:1:Name
+//          GCAL_FEED2_URL  -> GoogleCalendar:IcalFeeds:1:Url
+var feedEnvRegex = new Regex(@"^GCAL_FEED(?<n>\d+)_(?<kind>NAME|URL)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
+{
+    if (entry.Key is not string key)
+    {
+        continue;
+    }
+
+    var match = feedEnvRegex.Match(key);
+    if (!match.Success)
+    {
+        continue;
+    }
+
+    if (!int.TryParse(match.Groups["n"].Value, out var feedNumber) || feedNumber <= 0)
+    {
+        continue;
+    }
+
+    var value = entry.Value?.ToString();
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        continue;
+    }
+
+    var index = feedNumber - 1;
+    var kind = match.Groups["kind"].Value;
+    var configKey = kind.Equals("NAME", StringComparison.OrdinalIgnoreCase)
+        ? $"GoogleCalendar:IcalFeeds:{index}:Name"
+        : $"GoogleCalendar:IcalFeeds:{index}:Url";
+
+    envOverrides[configKey] = value;
+}
 
 // Gmail env vars (env-vars-only multi-account format)
 MapEnv(envOverrides, "GMAIL_ACCOUNTS", "Gmail:Accounts");
@@ -85,6 +125,7 @@ builder.Services.AddScoped<InstructionRepository>();
 builder.Services.AddScoped<AiTaskSettingRepository>();
 builder.Services.AddScoped<ScheduleRepository>();
 builder.Services.AddScoped<GoogleCalendarFeedRepository>();
+builder.Services.AddScoped<AppSettingsRepository>();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -104,6 +145,8 @@ builder.Services.AddAuthorization(options =>
 
 var aiDefaults = builder.Configuration.GetSection("AiDefaults");
 builder.Services.Configure<AiDefaults>(aiDefaults);
+
+builder.Services.Configure<ButlerOptions>(builder.Configuration.GetSection("Butler"));
 
 builder.Services.Configure<GoogleCalendarOptions>(builder.Configuration.GetSection("GoogleCalendar"));
 builder.Services.Configure<GmailOptions>(builder.Configuration.GetSection("Gmail"));
@@ -133,6 +176,7 @@ builder.Services.AddScoped<IContextUpdater>(sp => new ContextUpdater(
 builder.Services.AddScoped<ContextService>();
 builder.Services.AddScoped<InstructionService>();
 builder.Services.AddScoped<AiTaskSettingsService>();
+builder.Services.AddScoped<TimeZoneService>();
 builder.Services.AddSingleton<IManualSyncRunner, ManualSyncRunner>();
 
 var app = builder.Build();
