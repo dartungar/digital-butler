@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 using MimeKit;
 using System.Text;
 
-namespace DigitalButler.Modules;
+namespace DigitalButler.Context;
 
 public sealed class GmailContextSource : IContextSource
 {

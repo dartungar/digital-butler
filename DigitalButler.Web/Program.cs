@@ -1,6 +1,6 @@
-using DigitalButler.Modules;
-using DigitalButler.Modules.Data;
-using DigitalButler.Modules.Repositories;
+using DigitalButler.Context;
+using DigitalButler.Context.Data;
+using DigitalButler.Context.Repositories;
 using DigitalButler.Web.Components;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authentication;

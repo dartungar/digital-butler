@@ -1,6 +1,6 @@
-using DigitalButler.Modules.Repositories;
+using DigitalButler.Context.Repositories;
 
-namespace DigitalButler.Modules;
+namespace DigitalButler.Context;
 
 public class ContextService
 {

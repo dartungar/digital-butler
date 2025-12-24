@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
-namespace DigitalButler.Modules;
+namespace DigitalButler.Context;
 
 public class OpenAiSummarizationService : ISummarizationService
 {

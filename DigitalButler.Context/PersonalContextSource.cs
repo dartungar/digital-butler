@@ -1,4 +1,4 @@
-namespace DigitalButler.Modules;
+namespace DigitalButler.Context;
 
 /// <summary>
 /// Personal context is added directly via UI/Telegram and stored immediately, so the updater has nothing to pull.

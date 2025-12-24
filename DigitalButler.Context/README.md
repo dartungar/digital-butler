@@ -1,4 +1,4 @@
-# DigitalButler Modules
+# DigitalButler Context
 
 Shared domain, EF Core context, and AI helpers for the digital butler.
 
@@ -11,7 +11,7 @@ Shared domain, EF Core context, and AI helpers for the digital butler.
 
 ## Services
 - `ButlerDbContext`: EF Core SQLite context.
-- `IContextSource`/`IContextUpdater`: abstractions for modules; `ContextUpdater` provides upsert logic.
+- `IContextSource`/`IContextUpdater`: abstractions for context sources; `ContextUpdater` provides upsert logic.
 - `ISummarizationService`: summarization abstraction implemented by `OpenAiSummarizationService`.
 - `AiSettingsResolver`: merges DB overrides with env defaults.
 

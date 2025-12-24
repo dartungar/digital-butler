@@ -1,7 +1,7 @@
-using DigitalButler.Modules.Repositories;
+using DigitalButler.Context.Repositories;
 using Microsoft.Extensions.Options;
 
-namespace DigitalButler.Modules;
+namespace DigitalButler.Context;
 
 public sealed class TimeZoneService
 {

@@ -2,7 +2,7 @@ using Dapper;
 using System.Data;
 using System.Globalization;
 
-namespace DigitalButler.Modules.Data;
+namespace DigitalButler.Context.Data;
 
 public static class DapperTypeHandlers
 {

@@ -1,4 +1,4 @@
-﻿namespace DigitalButler.Modules;
+﻿namespace DigitalButler.Context;
 
 public enum ContextSource
 {

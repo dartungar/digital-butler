@@ -7,7 +7,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\DigitalButler.Modules\DigitalButler.Modules.csproj" />
+        <ProjectReference Include="..\DigitalButler.Context\DigitalButler.Context.csproj" />
     </ItemGroup>
 
     <ItemGroup>

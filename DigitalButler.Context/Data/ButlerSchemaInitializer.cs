@@ -1,6 +1,6 @@
 using Dapper;
 
-namespace DigitalButler.Modules.Data;
+namespace DigitalButler.Context.Data;
 
 public sealed class ButlerSchemaInitializer
 {

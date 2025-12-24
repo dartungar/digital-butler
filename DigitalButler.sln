@@ -2,7 +2,7 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DigitalButler.Web", "DigitalButler.Web\DigitalButler.Web.csproj", "{715FF6A2-FFAC-4DDB-A332-757D24564D71}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DigitalButler.Modules", "DigitalButler.Modules\DigitalButler.Modules.csproj", "{2D1402AD-45E8-41FB-AA49-62D3A183447D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DigitalButler.Context", "DigitalButler.Context\DigitalButler.Context.csproj", "{2D1402AD-45E8-41FB-AA49-62D3A183447D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DigitalButler.Telegram", "DigitalButler.Telegram\DigitalButler.Telegram.csproj", "{61E8AAFE-A4EF-423E-B50E-5BB74A2F3AAC}"
 EndProject

@@ -1,6 +1,6 @@
 using Microsoft.Data.Sqlite;
 
-namespace DigitalButler.Modules.Data;
+namespace DigitalButler.Context.Data;
 
 public interface IButlerDb
 {

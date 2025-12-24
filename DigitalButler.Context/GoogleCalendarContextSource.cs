@@ -6,9 +6,9 @@ using Microsoft.Extensions.Options;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
-using DigitalButler.Modules.Repositories;
+using DigitalButler.Context.Repositories;
 
-namespace DigitalButler.Modules;
+namespace DigitalButler.Context;
 
 public sealed class GoogleCalendarContextSource : IContextSource
 {

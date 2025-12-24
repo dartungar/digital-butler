@@ -1,7 +1,7 @@
 using Dapper;
-using DigitalButler.Modules.Data;
+using DigitalButler.Context.Data;
 
-namespace DigitalButler.Modules.Repositories;
+namespace DigitalButler.Context.Repositories;
 
 public sealed class InstructionRepository
 {

@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging;
-using DigitalButler.Modules.Repositories;
+using DigitalButler.Context.Repositories;
 
-namespace DigitalButler.Modules;
+namespace DigitalButler.Context;
 
 public sealed class ContextUpdater : IContextUpdater
 {

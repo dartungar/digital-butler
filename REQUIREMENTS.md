@@ -17,7 +17,7 @@ App has access to several sources of context:
 - Personal context added by user
 - potentially more sources, like weather, air pollution, news, etc.
 
-Each external context source (called "Module", see DigitalButler.Modules project) has its own updater that runs on a schedule 
+Each external context source (called "Context", see DigitalButler.Context project) has its own updater that runs on a schedule 
 (configurable via Admin UI) to pull new data and update the database.
 
 Information from sources is pulled via APIs, processed (categorized/summarized) via AI, and stored in the database.
