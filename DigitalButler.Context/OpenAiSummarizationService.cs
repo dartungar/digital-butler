@@ -32,7 +32,12 @@ Do not invent items that are not present.
         _logger = logger;
     }
 
-    public async Task<string> SummarizeAsync(IEnumerable<ContextItem> items, IReadOnlyDictionary<ContextSource, string> instructionsBySource, string taskName, CancellationToken ct = default)
+    public async Task<string> SummarizeAsync(
+        IEnumerable<ContextItem> items,
+        IReadOnlyDictionary<ContextSource, string> instructionsBySource,
+        string taskName,
+        string? skillInstructions = null,
+        CancellationToken ct = default)
     {
         var settings = await _resolver.ResolveAsync(taskName, ct);
         if (string.IsNullOrWhiteSpace(settings.ApiKey) || string.IsNullOrWhiteSpace(settings.Model))
@@ -56,7 +61,7 @@ Do not invent items that are not present.
         {
             var group = groups[0];
             instructionsBySource.TryGetValue(group.Key, out var perSource);
-            return await SummarizeOneSourceAsync(group.Key, group, perSource, settings, ct);
+            return await SummarizeOneSourceAsync(group.Key, group, perSource, skillInstructions, taskName, settings, ct);
         }
 
         // Run per-source AI calls in parallel (bounded) to reduce end-to-end latency.
@@ -71,7 +76,7 @@ Do not invent items that are not present.
                 try
                 {
                     instructionsBySource.TryGetValue(group.Key, out var perSource);
-                    var section = await SummarizeOneSourceAsync(group.Key, group, perSource, settings, ct);
+                    var section = await SummarizeOneSourceAsync(group.Key, group, perSource, skillInstructions, taskName, settings, ct);
                     return (index, source: group.Key, section);
                 }
                 finally
@@ -108,11 +113,13 @@ Do not invent items that are not present.
         ContextSource source,
         IEnumerable<ContextItem> items,
         string? perSourceInstructions,
+        string? skillInstructions,
+        string taskName,
         AiSettings settings,
         CancellationToken ct)
     {
-        var systemPrompt = BuildPerSourceSystemPrompt(source, perSourceInstructions);
-        var prompt = BuildPromptForOneSource(source, items);
+        var systemPrompt = BuildPerSourceSystemPrompt(source, perSourceInstructions, skillInstructions);
+        var prompt = BuildPromptForOneSource(source, items, taskName);
         var endpoint = ResolveEndpoint(settings.BaseUrl);
         if (!endpoint.Contains("/responses", StringComparison.OrdinalIgnoreCase))
         {
@@ -315,11 +322,35 @@ Do not invent items that are not present.
         return value[..maxLen] + "…";
     }
 
-    private static string BuildPromptForOneSource(ContextSource source, IEnumerable<ContextItem> items)
+    private static string BuildPromptForOneSource(ContextSource source, IEnumerable<ContextItem> items, string taskName)
     {
+        // Motivation/activities are skills, not summaries. Don't force a "Summarize" instruction.
+        // We still keep the same input shape (items list), but the task description changes.
+        var isMotivation = taskName.Equals("motivation", StringComparison.OrdinalIgnoreCase);
+        var isActivities = taskName.Equals("activities", StringComparison.OrdinalIgnoreCase);
+
         var sb = new StringBuilder();
-        sb.AppendLine($"Summarize the following context items from source: {source}.");
-        sb.AppendLine("Return ONLY the summary text for this source (no headings).");
+
+        if (isMotivation)
+        {
+            sb.AppendLine("Write a short motivational message for the user.");
+            sb.AppendLine("Ground it in the personal context items below, but do NOT quote or list the items.");
+            sb.AppendLine("Do not output meta-commentary like 'contains' or 'the notes say'.");
+            sb.AppendLine("Keep it concise (3-8 sentences), no bullet list.");
+        }
+        else if (isActivities)
+        {
+            sb.AppendLine("Suggest what the user could do next.");
+            sb.AppendLine("Ground it in the personal context items below.");
+            sb.AppendLine("Return 3-7 bullet points, each with a short rationale.");
+            sb.AppendLine("Do not quote the items verbatim.");
+        }
+        else
+        {
+            sb.AppendLine($"Summarize the following context items from source: {source}.");
+            sb.AppendLine("Return ONLY the summary text for this source (no headings).");
+        }
+
         sb.AppendLine();
         sb.AppendLine("Items:");
         foreach (var item in items)
@@ -364,12 +395,19 @@ Do not invent items that are not present.
         return value[..maxLen] + "…";
     }
 
-    private static string BuildPerSourceSystemPrompt(ContextSource source, string? perSourceInstructions)
+    private static string BuildPerSourceSystemPrompt(ContextSource source, string? perSourceInstructions, string? skillInstructions)
     {
         var sb = new StringBuilder();
         sb.AppendLine(BaseSystemPrompt.Trim());
         sb.AppendLine();
         sb.AppendLine($"Source: {source}");
+
+        if (!string.IsNullOrWhiteSpace(skillInstructions))
+        {
+            sb.AppendLine();
+            sb.AppendLine("Skill instructions:");
+            sb.AppendLine(skillInstructions.Trim());
+        }
 
         if (!string.IsNullOrWhiteSpace(perSourceInstructions))
         {

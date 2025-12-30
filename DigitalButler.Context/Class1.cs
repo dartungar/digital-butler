@@ -49,6 +49,22 @@ public class SummarySchedule
     public bool Enabled { get; set; } = true;
 }
 
+public enum ButlerSkill
+{
+    Summary = 0,
+    Motivation = 1,
+    Activities = 2
+}
+
+public class SkillInstruction
+{
+    public Guid Id { get; set; }
+    public ButlerSkill Skill { get; set; }
+    public string Content { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
 public class AiTaskSetting
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -83,7 +99,12 @@ public interface IContextUpdater
 
 public interface ISummarizationService
 {
-    Task<string> SummarizeAsync(IEnumerable<ContextItem> items, IReadOnlyDictionary<ContextSource, string> instructionsBySource, string taskName, CancellationToken ct = default);
+    Task<string> SummarizeAsync(
+        IEnumerable<ContextItem> items,
+        IReadOnlyDictionary<ContextSource, string> instructionsBySource,
+        string taskName,
+        string? skillInstructions = null,
+        CancellationToken ct = default);
 }
 
 public interface IScheduleService

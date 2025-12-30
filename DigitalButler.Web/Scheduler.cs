@@ -36,6 +36,7 @@ public class SchedulerService : BackgroundService
         using var scope = _services.CreateScope();
         var contextService = scope.ServiceProvider.GetRequiredService<ContextService>();
         var instructionService = scope.ServiceProvider.GetRequiredService<InstructionService>();
+        var skillInstructionService = scope.ServiceProvider.GetRequiredService<SkillInstructionService>();
         var summarizer = scope.ServiceProvider.GetRequiredService<ISummarizationService>();
         var nowUtc = DateTimeOffset.UtcNow;
         var tzService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
@@ -74,7 +75,7 @@ public class SchedulerService : BackgroundService
         {
             if (sched.Time.Hour == localNow.Hour && sched.Time.Minute == localNow.Minute)
             {
-                await SendSummaryAsync(contextService, instructionService, summarizer, tz, "daily-summary", bot, chatId, ct);
+                await SendSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, tz, "daily-summary", bot, chatId, ct);
             }
         }
 
@@ -84,12 +85,12 @@ public class SchedulerService : BackgroundService
         {
             if (sched.DayOfWeek == localNow.DayOfWeek && sched.Time.Hour == localNow.Hour && sched.Time.Minute == localNow.Minute)
             {
-                await SendSummaryAsync(contextService, instructionService, summarizer, tz, "weekly-summary", bot, chatId, ct);
+                await SendSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, tz, "weekly-summary", bot, chatId, ct);
             }
         }
     }
 
-    private static async Task SendSummaryAsync(ContextService contextService, InstructionService instructionService, ISummarizationService summarizer, TimeZoneInfo tz, string taskName, ITelegramBotClient? bot, string? chatId, CancellationToken ct)
+    private static async Task SendSummaryAsync(ContextService contextService, InstructionService instructionService, SkillInstructionService skillInstructionService, ISummarizationService summarizer, TimeZoneInfo tz, string taskName, ITelegramBotClient? bot, string? chatId, CancellationToken ct)
     {
         var items = taskName switch
         {
@@ -100,7 +101,11 @@ public class SchedulerService : BackgroundService
 
         var sources = items.Select(x => x.Source).Distinct().ToArray();
         var instructionsBySource = await instructionService.GetBySourcesAsync(sources, ct);
-        var summary = await summarizer.SummarizeAsync(items, instructionsBySource, taskName, ct);
+        var skillInstructions = await skillInstructionService.GetBySkillsAsync(new[] { ButlerSkill.Summary }, ct);
+        skillInstructions.TryGetValue(ButlerSkill.Summary, out var custom);
+        var period = taskName.StartsWith("weekly", StringComparison.OrdinalIgnoreCase) ? "weekly" : "daily";
+        var prompt = $"Skill: summary\nPeriod: {period}\nOutput a concise agenda with actionable highlights.\n" + (string.IsNullOrWhiteSpace(custom) ? string.Empty : "\n" + custom.Trim());
+        var summary = await summarizer.SummarizeAsync(items, instructionsBySource, taskName, prompt, ct);
         if (bot != null && !string.IsNullOrWhiteSpace(chatId))
         {
             await bot.SendTextMessageAsync(chatId, summary, cancellationToken: ct);

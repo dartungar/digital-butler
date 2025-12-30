@@ -122,6 +122,7 @@ builder.Services.AddSingleton<ButlerSchemaInitializer>();
 
 builder.Services.AddScoped<ContextRepository>();
 builder.Services.AddScoped<InstructionRepository>();
+builder.Services.AddScoped<SkillInstructionRepository>();
 builder.Services.AddScoped<AiTaskSettingRepository>();
 builder.Services.AddScoped<ScheduleRepository>();
 builder.Services.AddScoped<GoogleCalendarFeedRepository>();
@@ -151,6 +152,7 @@ builder.Services.Configure<ButlerOptions>(builder.Configuration.GetSection("Butl
 builder.Services.Configure<GoogleCalendarOptions>(builder.Configuration.GetSection("GoogleCalendar"));
 builder.Services.Configure<GmailOptions>(builder.Configuration.GetSection("Gmail"));
 builder.Services.AddHttpClient<ISummarizationService, OpenAiSummarizationService>();
+builder.Services.AddHttpClient<ISkillRouter, OpenAiSkillRouter>();
 builder.Services.AddScoped<AiSettingsResolver>();
 builder.Services.AddHostedService<BotService>();
 builder.Services.AddHostedService<SchedulerService>();
@@ -175,6 +177,7 @@ builder.Services.AddScoped<IContextUpdater>(sp => new ContextUpdater(
 
 builder.Services.AddScoped<ContextService>();
 builder.Services.AddScoped<InstructionService>();
+builder.Services.AddScoped<SkillInstructionService>();
 builder.Services.AddScoped<AiTaskSettingsService>();
 builder.Services.AddScoped<TimeZoneService>();
 builder.Services.AddSingleton<IManualSyncRunner, ManualSyncRunner>();

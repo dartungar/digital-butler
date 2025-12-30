@@ -49,6 +49,14 @@ public sealed class ButlerSchemaInitializer
                 UpdatedAt TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS SkillInstructions (
+                Id TEXT NOT NULL PRIMARY KEY,
+                Skill INTEGER NOT NULL,
+                Content TEXT NOT NULL,
+                CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS Schedules (
                 Id TEXT NOT NULL PRIMARY KEY,
                 Source INTEGER NOT NULL,
@@ -89,6 +97,7 @@ public sealed class ButlerSchemaInitializer
             CREATE UNIQUE INDEX IF NOT EXISTS IX_Schedules_Source ON Schedules (Source);
             CREATE INDEX IF NOT EXISTS IX_SummarySchedules_IsWeekly_DayOfWeek ON SummarySchedules (IsWeekly, DayOfWeek);
             CREATE UNIQUE INDEX IF NOT EXISTS IX_GoogleCalendarFeeds_Url ON GoogleCalendarFeeds (Url);
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_SkillInstructions_Skill ON SkillInstructions (Skill);
             """
         );
     }

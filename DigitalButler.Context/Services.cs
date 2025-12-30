@@ -121,3 +121,16 @@ public class AiTaskSettingsService
     }
 }
 
+public class SkillInstructionService
+{
+    private readonly Repositories.SkillInstructionRepository _repo;
+
+    public SkillInstructionService(Repositories.SkillInstructionRepository repo)
+    {
+        _repo = repo;
+    }
+
+    public Task<Dictionary<ButlerSkill, string>> GetBySkillsAsync(IEnumerable<ButlerSkill> skills, CancellationToken ct = default)
+        => _repo.GetBySkillsAsync(skills, ct);
+}
+

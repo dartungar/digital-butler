@@ -125,7 +125,9 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         using var scope = _services.CreateScope();
         var contextService = scope.ServiceProvider.GetRequiredService<ContextService>();
         var instructionService = scope.ServiceProvider.GetRequiredService<InstructionService>();
+        var skillInstructionService = scope.ServiceProvider.GetRequiredService<SkillInstructionService>();
         var summarizer = scope.ServiceProvider.GetRequiredService<ISummarizationService>();
+        var skillRouter = scope.ServiceProvider.GetRequiredService<ISkillRouter>();
         var tzService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
 
         if (text.StartsWith("/start", StringComparison.OrdinalIgnoreCase) || text.StartsWith("/help", StringComparison.OrdinalIgnoreCase))
@@ -134,6 +136,8 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
                 "Commands:\n" +
                 "/daily - today + timeless\n" +
                 "/weekly - this week + timeless\n" +
+                "/motivation - motivational message\n" +
+                "/activities - activity suggestions\n" +
                 "/add <text> - add personal context\n" +
                 "/sync - run all ingests now",
                 cancellationToken: ct);
@@ -160,11 +164,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             await SendWithKeyboardAsync(bot, chatId, "Generating daily summary...", cancellationToken: ct);
             try
             {
-                var tz = await tzService.GetTimeZoneInfoAsync(ct);
-                var items = await GetDailyItemsAsync(contextService, tz, ct);
-                var sources = items.Select(x => x.Source).Distinct().ToArray();
-                var instructionsBySource = await instructionService.GetBySourcesAsync(sources, ct);
-                var summary = await summarizer.SummarizeAsync(items, instructionsBySource, "on-demand-daily", ct);
+                var summary = await ExecuteSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, tzService, weekly: false, taskName: "on-demand-daily", ct);
                 if (string.IsNullOrWhiteSpace(summary)) summary = "No summary available.";
                 await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(summary), cancellationToken: ct);
             }
@@ -186,11 +186,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             await SendWithKeyboardAsync(bot, chatId, "Generating weekly summary...", cancellationToken: ct);
             try
             {
-                var tz = await tzService.GetTimeZoneInfoAsync(ct);
-                var items = await GetWeeklyItemsAsync(contextService, tz, ct);
-                var sources = items.Select(x => x.Source).Distinct().ToArray();
-                var instructionsBySource = await instructionService.GetBySourcesAsync(sources, ct);
-                var summary = await summarizer.SummarizeAsync(items, instructionsBySource, "on-demand-weekly", ct);
+                var summary = await ExecuteSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, tzService, weekly: true, taskName: "on-demand-weekly", ct);
                 if (string.IsNullOrWhiteSpace(summary)) summary = "No summary available.";
                 await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(summary), cancellationToken: ct);
             }
@@ -231,7 +227,77 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             return;
         }
 
-        await SendWithKeyboardAsync(bot, chatId, "Unknown command. Use /daily, /weekly, /add <text>", cancellationToken: ct);
+        if (text.StartsWith("/motivation", StringComparison.OrdinalIgnoreCase))
+        {
+            await SendWithKeyboardAsync(bot, chatId, "Generating motivation...", cancellationToken: ct);
+            try
+            {
+                var result = await ExecuteMotivationAsync(contextService, instructionService, skillInstructionService, summarizer, tzService, ct);
+                if (string.IsNullOrWhiteSpace(result)) result = "No motivation available.";
+                await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(result), cancellationToken: ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Host is shutting down.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to generate /motivation");
+                await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), cancellationToken: ct);
+            }
+            return;
+        }
+
+        if (text.StartsWith("/activities", StringComparison.OrdinalIgnoreCase))
+        {
+            await SendWithKeyboardAsync(bot, chatId, "Generating activities...", cancellationToken: ct);
+            try
+            {
+                var result = await ExecuteActivitiesAsync(contextService, instructionService, skillInstructionService, summarizer, tzService, ct);
+                if (string.IsNullOrWhiteSpace(result)) result = "No activities available.";
+                await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(result), cancellationToken: ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Host is shutting down.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to generate /activities");
+                await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), cancellationToken: ct);
+            }
+            return;
+        }
+
+        // Plain text: route to a skill using AI.
+        if (!text.StartsWith("/", StringComparison.OrdinalIgnoreCase))
+        {
+            var route = await skillRouter.RouteAsync(text, ct);
+            switch (route.Skill)
+            {
+                case ButlerSkill.Motivation:
+                    await SendWithKeyboardAsync(bot, chatId, "Generating motivation...", cancellationToken: ct);
+                    var motivation = await ExecuteMotivationAsync(contextService, instructionService, skillInstructionService, summarizer, tzService, ct);
+                    if (string.IsNullOrWhiteSpace(motivation)) motivation = "No motivation available.";
+                    await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(motivation), cancellationToken: ct);
+                    return;
+                case ButlerSkill.Activities:
+                    await SendWithKeyboardAsync(bot, chatId, "Generating activities...", cancellationToken: ct);
+                    var activities = await ExecuteActivitiesAsync(contextService, instructionService, skillInstructionService, summarizer, tzService, ct);
+                    if (string.IsNullOrWhiteSpace(activities)) activities = "No activities available.";
+                    await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(activities), cancellationToken: ct);
+                    return;
+                case ButlerSkill.Summary:
+                default:
+                    await SendWithKeyboardAsync(bot, chatId, route.PreferWeeklySummary ? "Generating weekly summary..." : "Generating daily summary...", cancellationToken: ct);
+                    var summary = await ExecuteSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, tzService, weekly: route.PreferWeeklySummary, taskName: route.PreferWeeklySummary ? "on-demand-weekly" : "on-demand-daily", ct);
+                    if (string.IsNullOrWhiteSpace(summary)) summary = "No summary available.";
+                    await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(summary), cancellationToken: ct);
+                    return;
+            }
+        }
+
+        await SendWithKeyboardAsync(bot, chatId, "Unknown command. Use /daily, /weekly, /motivation, /activities, /add <text>", cancellationToken: ct);
     }
 
     private static ReplyKeyboardMarkup BuildKeyboard()
@@ -239,11 +305,129 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         return new ReplyKeyboardMarkup(new[]
         {
             new[] { new KeyboardButton("/daily"), new KeyboardButton("/weekly") },
+            new[] { new KeyboardButton("/motivation"), new KeyboardButton("/activities") },
             new[] { new KeyboardButton("/add ") }
         })
         {
             ResizeKeyboard = true
         };
+    }
+
+    private static async Task<string?> GetSkillInstructionsAsync(SkillInstructionService svc, ButlerSkill skill, CancellationToken ct)
+    {
+        var dict = await svc.GetBySkillsAsync(new[] { skill }, ct);
+        return dict.TryGetValue(skill, out var v) ? v : null;
+    }
+
+    private static async Task<string> ExecuteSummaryAsync(
+        ContextService contextService,
+        InstructionService instructionService,
+        SkillInstructionService skillInstructionService,
+        ISummarizationService summarizer,
+        TimeZoneService tzService,
+        bool weekly,
+        string taskName,
+        CancellationToken ct)
+    {
+        var tz = await tzService.GetTimeZoneInfoAsync(ct);
+        var items = weekly
+            ? await GetWeeklyItemsAsync(contextService, tz, ct)
+            : await GetDailyItemsAsync(contextService, tz, ct);
+
+        var sources = items.Select(x => x.Source).Distinct().ToArray();
+        var instructionsBySource = await instructionService.GetBySourcesAsync(sources, ct);
+        var skillInstructions = await GetSkillInstructionsAsync(skillInstructionService, ButlerSkill.Summary, ct);
+        var period = weekly ? "weekly" : "daily";
+        return await summarizer.SummarizeAsync(items, instructionsBySource, taskName, BuildSummarySkillPrompt(period, skillInstructions), ct);
+    }
+
+    private static async Task<string> ExecuteMotivationAsync(
+        ContextService contextService,
+        InstructionService instructionService,
+        SkillInstructionService skillInstructionService,
+        ISummarizationService summarizer,
+        TimeZoneService tzService,
+        CancellationToken ct)
+    {
+        var tz = await tzService.GetTimeZoneInfoAsync(ct);
+        var items = await GetPersonalRelevantItemsAsync(contextService, tz, daysBack: 30, take: 250, ct);
+        // Motivation should be driven by Personal context and per-skill instructions only.
+        // Do NOT apply per-source instructions (e.g. Google Calendar formatting) to this skill.
+        var instructionsBySource = new Dictionary<ContextSource, string>();
+        var skillInstructions = await GetSkillInstructionsAsync(skillInstructionService, ButlerSkill.Motivation, ct);
+        var prompt = BuildMotivationSkillPrompt(skillInstructions);
+        return await summarizer.SummarizeAsync(items, instructionsBySource, "motivation", prompt, ct);
+    }
+
+    private static async Task<string> ExecuteActivitiesAsync(
+        ContextService contextService,
+        InstructionService instructionService,
+        SkillInstructionService skillInstructionService,
+        ISummarizationService summarizer,
+        TimeZoneService tzService,
+        CancellationToken ct)
+    {
+        var tz = await tzService.GetTimeZoneInfoAsync(ct);
+        var items = await GetPersonalRelevantItemsAsync(contextService, tz, daysBack: 14, take: 250, ct);
+        // Activities should be driven by Personal context and per-skill instructions only.
+        // Do NOT apply per-source instructions (e.g. Google Calendar formatting) to this skill.
+        var instructionsBySource = new Dictionary<ContextSource, string>();
+        var skillInstructions = await GetSkillInstructionsAsync(skillInstructionService, ButlerSkill.Activities, ct);
+        var prompt = BuildActivitiesSkillPrompt(skillInstructions);
+        return await summarizer.SummarizeAsync(items, instructionsBySource, "activities", prompt, ct);
+    }
+
+    private static string BuildSummarySkillPrompt(string period, string? custom)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Skill: summary");
+        sb.AppendLine($"Period: {period}");
+        sb.AppendLine("Output a concise agenda with actionable highlights.");
+        if (!string.IsNullOrWhiteSpace(custom))
+        {
+            sb.AppendLine();
+            sb.AppendLine(custom.Trim());
+        }
+        return sb.ToString();
+    }
+
+    private static string BuildMotivationSkillPrompt(string? custom)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Skill: motivation");
+        sb.AppendLine("Write a short motivational message grounded ONLY in Personal context items.");
+        sb.AppendLine("Ignore calendar/events/emails unless they are part of Personal context.");
+        sb.AppendLine("Do not summarize the notes; do not quote them; use them only as inspiration.");
+        sb.AppendLine("Do not mention that you are an AI or that you were given 'context items'.");
+        if (!string.IsNullOrWhiteSpace(custom))
+        {
+            sb.AppendLine();
+            sb.AppendLine(custom.Trim());
+        }
+        return sb.ToString();
+    }
+
+    private static string BuildActivitiesSkillPrompt(string? custom)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Skill: activities");
+        sb.AppendLine("Suggest a small list of activities based on energy/mood signals in Personal context.");
+        sb.AppendLine("Ignore calendar/events/emails unless they are part of Personal context.");
+        sb.AppendLine("Prefer 3-7 bullet points with brief rationale.");
+        sb.AppendLine("Do not quote the notes; use them only as signals.");
+        if (!string.IsNullOrWhiteSpace(custom))
+        {
+            sb.AppendLine();
+            sb.AppendLine(custom.Trim());
+        }
+        return sb.ToString();
+    }
+
+    private static async Task<List<ContextItem>> GetPersonalRelevantItemsAsync(ContextService contextService, TimeZoneInfo tz, int daysBack, int take, CancellationToken ct)
+    {
+        // GetRelevantAsync includes timeless items, then we filter to personal.
+        var items = await contextService.GetRelevantAsync(daysBack: daysBack, take: take, ct: ct);
+        return items.Where(x => x.Source == ContextSource.Personal).ToList();
     }
 
     private static Task SendWithKeyboardAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken cancellationToken)

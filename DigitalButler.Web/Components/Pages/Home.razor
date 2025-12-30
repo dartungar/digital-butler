@@ -150,7 +150,7 @@ else
             var items = await GetDailyItemsAsync(tz);
             var sources = items.Select(x => x.Source).Distinct().ToArray();
             var instructionsBySource = await InstructionService.GetBySourcesAsync(sources);
-            var summary = await Summarizer.SummarizeAsync(items, instructionsBySource, "on-demand-daily", CancellationToken.None);
+            var summary = await Summarizer.SummarizeAsync(items, instructionsBySource, "on-demand-daily", skillInstructions: null, ct: CancellationToken.None);
             _summaryMessage = string.IsNullOrWhiteSpace(summary) ? "No summary available." : summary;
         }
         finally
@@ -169,7 +169,7 @@ else
             var items = await GetWeeklyItemsAsync(tz);
             var sources = items.Select(x => x.Source).Distinct().ToArray();
             var instructionsBySource = await InstructionService.GetBySourcesAsync(sources);
-            var summary = await Summarizer.SummarizeAsync(items, instructionsBySource, "on-demand-weekly", CancellationToken.None);
+            var summary = await Summarizer.SummarizeAsync(items, instructionsBySource, "on-demand-weekly", skillInstructions: null, ct: CancellationToken.None);
             _summaryMessage = string.IsNullOrWhiteSpace(summary) ? "No summary available." : summary;
         }
         finally

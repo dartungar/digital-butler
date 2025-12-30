@@ -45,7 +45,19 @@ else
 
 @code {
     private List<AiTaskSetting>? _settings;
-    private readonly string[] _tasks = new[] { "daily-summary", "weekly-summary", "gmail", "gcal", "personal" };
+    private readonly string[] _tasks = new[]
+    {
+        "daily-summary",
+        "weekly-summary",
+        "on-demand-daily",
+        "on-demand-weekly",
+        "motivation",
+        "activities",
+        "skill-routing",
+        "gmail",
+        "gcal",
+        "personal"
+    };
 
     protected override async Task OnInitializedAsync()
     {

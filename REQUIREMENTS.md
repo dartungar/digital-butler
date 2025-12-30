@@ -1,14 +1,24 @@
 This is a digital butler that uses various contexts 
 (calendar events, e-mails, and personal context, all stored in SQLite Database) 
-to provide information and advice:
+to provide information and advice.
 - as daily/weekly agenda
 - on-demand
-- 
 For daily summary, app sends a summary of relevant context for the upcoming day to the user via Telegram at a scheduled time.
 For on-demand, user can just message the bot via Telegram to get a summary of relevant context at any time.
 
 AI is used to process and summarize the context before sending it to the user.
 AI model and API keys are set via environment variables.
+
+##### Skills
+The butler has a set of skills that he uses to help the user:
+- summary: provide weekly or daily summary (agenda) (has configurable schedule)
+- motivation: say something motivational based on personal context
+- activities: what to do based on my level of energy, mood, etc
+- more to come
+
+The butler is able to determine which skill to use based on text input (using AI). The skill can also be invoked via direct command, e.g in telegram bot: /motivation.
+
+The user is able to set custom instructions for each skill on web UI.
 
 ##### Context
 App has access to several sources of context:
@@ -29,7 +39,7 @@ All context can be:
 ##### Admin UI
 App has an admin UI where I can:
 - view and edit stored context
-- set custom instructions for the butler (e.g how each context source should be processed)
+- set custom instructions for the butler
 - configure schedule of context updating and daily/weekly summaries
 
 Admin UI should be implemented as a web app using Blazor or Razor Pages.

@@ -1,0 +1,67 @@
+@page "/skills"
+@inject global::DigitalButler.Context.Repositories.SkillInstructionRepository Repo
+
+<PageTitle>Skills</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">Instructions per Skill</h3>
+    <p class="subtitle is-6">These are used to guide skill responses (summary/motivation/activities).</p>
+</div>
+
+@if (_items is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <div class="box">
+        <EditForm Model="this" OnValidSubmit="SaveAsync">
+            <div class="table-container">
+                <table class="table is-fullwidth is-striped">
+                    <thead>
+                        <tr>
+                            <th>Skill</th>
+                            <th>Content</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var item in _items)
+                    {
+                        <tr>
+                            <td style="white-space:nowrap;">@item.Skill</td>
+                            <td>
+                                <InputTextArea class="textarea" style="min-width:400px;" @bind-Value="item.Content" />
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+            <div class="buttons">
+                <button class="button is-primary" type="submit">Save</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+@code {
+    private List<global::DigitalButler.Context.SkillInstruction>? _items;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _items = await Repo.GetAllAsync();
+        foreach (var skill in Enum.GetValues<global::DigitalButler.Context.ButlerSkill>())
+        {
+            if (_items.All(x => x.Skill != skill))
+            {
+                _items.Add(new global::DigitalButler.Context.SkillInstruction { Skill = skill, Content = string.Empty });
+            }
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_items is null) return;
+        await Repo.ReplaceAllAsync(_items);
+    }
+}
