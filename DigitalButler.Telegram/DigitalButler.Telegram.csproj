@@ -8,12 +8,14 @@
 
     <ItemGroup>
         <ProjectReference Include="..\DigitalButler.Context\DigitalButler.Context.csproj" />
+        <ProjectReference Include="..\DigitalButler.Data\DigitalButler.Data.csproj" />
+        <ProjectReference Include="..\DigitalButler.Skills\DigitalButler.Skills.csproj" />
     </ItemGroup>
 
     <ItemGroup>
         <PackageReference Include="Telegram.Bot" Version="19.0.0" />
-        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0-preview.3.24172.9" />
-        <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0-preview.3.24172.9" />
+        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0-preview.3.25171.5" />
+        <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0-preview.3.25171.5" />
     </ItemGroup>
 
 </Project>

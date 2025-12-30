@@ -1,5 +1,5 @@
 @page "/skills"
-@inject global::DigitalButler.Context.Repositories.SkillInstructionRepository Repo
+@inject global::DigitalButler.Data.Repositories.SkillInstructionRepository Repo
 
 <PageTitle>Skills</PageTitle>
 
@@ -45,16 +45,16 @@ else
 }
 
 @code {
-    private List<global::DigitalButler.Context.SkillInstruction>? _items;
+    private List<global::DigitalButler.Data.SkillInstruction>? _items;
 
     protected override async Task OnInitializedAsync()
     {
         _items = await Repo.GetAllAsync();
-        foreach (var skill in Enum.GetValues<global::DigitalButler.Context.ButlerSkill>())
+        foreach (var skill in Enum.GetValues<global::DigitalButler.Data.ButlerSkill>())
         {
             if (_items.All(x => x.Skill != skill))
             {
-                _items.Add(new global::DigitalButler.Context.SkillInstruction { Skill = skill, Content = string.Empty });
+                _items.Add(new global::DigitalButler.Data.SkillInstruction { Skill = skill, Content = string.Empty });
             }
         }
     }

@@ -1,4 +1,5 @@
-using DigitalButler.Context.Repositories;
+using DigitalButler.Data;
+using DigitalButler.Data.Repositories;
 
 namespace DigitalButler.Context;
 
@@ -93,44 +94,5 @@ public class InstructionService
 
     public Task<Dictionary<ContextSource, string>> GetBySourcesAsync(IEnumerable<ContextSource> sources, CancellationToken ct = default)
         => _repo.GetBySourcesAsync(sources, ct);
-}
-
-public class AiTaskSettingsService
-{
-    private readonly AiTaskSettingRepository _repo;
-
-    public AiTaskSettingsService(AiTaskSettingRepository repo)
-    {
-        _repo = repo;
-    }
-
-    public Task<AiTaskSetting?> GetAsync(string taskName, CancellationToken ct = default) =>
-        _repo.GetByTaskNameAsync(taskName, ct);
-
-    public async Task<AiTaskSetting> UpsertAsync(string taskName, string? baseUrl, string? model, string? apiKey, CancellationToken ct = default)
-    {
-        var existing = await _repo.GetByTaskNameAsync(taskName, ct);
-        var row = existing ?? new AiTaskSetting { Id = Guid.NewGuid(), TaskName = taskName };
-        row.ProviderUrl = baseUrl;
-        row.Model = model;
-        row.ApiKey = apiKey;
-        row.UpdatedAt = DateTimeOffset.UtcNow;
-
-        await _repo.UpsertAsync(row, ct);
-        return row;
-    }
-}
-
-public class SkillInstructionService
-{
-    private readonly Repositories.SkillInstructionRepository _repo;
-
-    public SkillInstructionService(Repositories.SkillInstructionRepository repo)
-    {
-        _repo = repo;
-    }
-
-    public Task<Dictionary<ButlerSkill, string>> GetBySkillsAsync(IEnumerable<ButlerSkill> skills, CancellationToken ct = default)
-        => _repo.GetBySkillsAsync(skills, ct);
 }
 

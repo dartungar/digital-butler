@@ -1,5 +1,7 @@
 using DigitalButler.Context;
-using DigitalButler.Context.Repositories;
+using DigitalButler.Data;
+using DigitalButler.Data.Repositories;
+using DigitalButler.Skills;
 using Telegram.Bot;
 
 namespace DigitalButler.Web;

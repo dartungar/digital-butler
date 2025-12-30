@@ -1,4 +1,6 @@
 using DigitalButler.Context;
+using DigitalButler.Data;
+using DigitalButler.Skills;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

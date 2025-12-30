@@ -1,7 +1,8 @@
 @page "/ai-settings"
-@using DigitalButler.Context
+@using DigitalButler.Data
+@using DigitalButler.Skills
 @using Microsoft.Extensions.Options
-@inject DigitalButler.Context.Repositories.AiTaskSettingRepository Repo
+@inject DigitalButler.Data.Repositories.AiTaskSettingRepository Repo
 @inject IOptionsSnapshot<AiDefaults> AiDefaultsOptions
 
 <PageTitle>AI Settings</PageTitle>

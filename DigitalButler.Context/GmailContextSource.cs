@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MimeKit;
 using System.Text;
+using DigitalButler.Data;
 
 namespace DigitalButler.Context;
 

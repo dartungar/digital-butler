@@ -9,6 +9,8 @@
 
     <ItemGroup>
         <ProjectReference Include="..\DigitalButler.Context\DigitalButler.Context.csproj" />
+        <ProjectReference Include="..\DigitalButler.Data\DigitalButler.Data.csproj" />
+        <ProjectReference Include="..\DigitalButler.Skills\DigitalButler.Skills.csproj" />
         <ProjectReference Include="..\DigitalButler.Telegram\DigitalButler.Telegram.csproj" />
     </ItemGroup>
 
