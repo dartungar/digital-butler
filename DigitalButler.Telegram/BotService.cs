@@ -17,6 +17,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
     private readonly ILogger<BotService> _logger;
     private readonly IServiceProvider _services;
     private readonly string _token;
+    private readonly long _allowedUserId;
     private TelegramBotClient? _bot;
     private CancellationTokenSource? _cts;
     private Task? _runLoop;
@@ -26,6 +27,11 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         _logger = logger;
         _services = services;
         _token = config["TELEGRAM_BOT_TOKEN"] ?? throw new InvalidOperationException("TELEGRAM_BOT_TOKEN not configured");
+        
+        var allowedUserIdStr = config["TELEGRAM_ALLOWED_USER_ID"];
+        _allowedUserId = string.IsNullOrWhiteSpace(allowedUserIdStr) 
+            ? throw new InvalidOperationException("TELEGRAM_ALLOWED_USER_ID not configured") 
+            : long.Parse(allowedUserIdStr);
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -122,7 +128,16 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             return;
 
         var chatId = update.Message.Chat.Id;
+        var userId = update.Message.From?.Id;
         var text = update.Message.Text.Trim();
+
+        // Authorization check: only allow configured user
+        if (userId != _allowedUserId)
+        {
+            _logger.LogWarning("Unauthorized access attempt from user {UserId}", userId);
+            await SendWithKeyboardAsync(bot, chatId, "Unauthorized.", cancellationToken: ct);
+            return;
+        }
 
         using var scope = _services.CreateScope();
         var contextService = scope.ServiceProvider.GetRequiredService<ContextService>();
