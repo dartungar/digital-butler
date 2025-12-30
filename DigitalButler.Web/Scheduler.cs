@@ -8,11 +8,19 @@ public class SchedulerService : BackgroundService
 {
     private readonly IServiceProvider _services;
     private readonly ILogger<SchedulerService> _logger;
+    private readonly ITelegramBotClient? _bot;
+    private readonly IConfiguration _config;
 
-    public SchedulerService(IServiceProvider services, ILogger<SchedulerService> logger)
+    public SchedulerService(
+        IServiceProvider services,
+        ILogger<SchedulerService> logger,
+        IConfiguration config,
+        ITelegramBotClient? bot = null)
     {
         _services = services;
         _logger = logger;
+        _bot = bot;
+        _config = config;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -42,29 +50,28 @@ public class SchedulerService : BackgroundService
         var tzService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
         var tz = await tzService.GetTimeZoneInfoAsync(ct);
         var localNow = TimeZoneInfo.ConvertTime(nowUtc, tz);
-        var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
-        var chatId = config["TELEGRAM_CHAT_ID"] ?? config["Telegram:ChatId"];
-        ITelegramBotClient? bot = null;
-        if (!string.IsNullOrWhiteSpace(chatId))
-        {
-            var token = config["TELEGRAM_BOT_TOKEN"];
-            if (!string.IsNullOrWhiteSpace(token))
-            {
-                bot = new TelegramBotClient(token);
-            }
-        }
+        var chatId = _config["TELEGRAM_CHAT_ID"] ?? _config["Telegram:ChatId"];
         var schedules = scope.ServiceProvider.GetRequiredService<ScheduleRepository>();
+        var updaterRegistry = scope.ServiceProvider.GetRequiredService<IContextUpdaterRegistry>();
 
-        // Run module updates if interval elapsed (simplified: run hourly if enabled)
+        // Run module updates based on interval (parse CronOrInterval as minutes interval)
         foreach (var schedule in await schedules.GetEnabledUpdateSchedulesAsync(ct))
         {
-            // For now, run hourly based on CronOrInterval placeholder
-            if (nowUtc.Minute == 0)
+            var intervalMinutes = ParseIntervalMinutes(schedule.CronOrInterval);
+            if (intervalMinutes > 0 && nowUtc.Minute % intervalMinutes == 0)
             {
-                var updaters = scope.ServiceProvider.GetServices<IContextUpdater>().Where(u => u.Source == schedule.Source);
-                foreach (var updater in updaters)
+                var updater = updaterRegistry.GetUpdater(schedule.Source);
+                if (updater != null)
                 {
-                    await updater.UpdateAsync(ct);
+                    try
+                    {
+                        await updater.UpdateAsync(ct);
+                        _logger.LogInformation("Scheduled update for {Source} completed", schedule.Source);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Scheduled update for {Source} failed", schedule.Source);
+                    }
                 }
             }
         }
@@ -75,7 +82,7 @@ public class SchedulerService : BackgroundService
         {
             if (sched.Time.Hour == localNow.Hour && sched.Time.Minute == localNow.Minute)
             {
-                await SendSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, tz, "daily-summary", bot, chatId, ct);
+                await SendSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, tz, "daily-summary", chatId, ct);
             }
         }
 
@@ -85,19 +92,46 @@ public class SchedulerService : BackgroundService
         {
             if (sched.DayOfWeek == localNow.DayOfWeek && sched.Time.Hour == localNow.Hour && sched.Time.Minute == localNow.Minute)
             {
-                await SendSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, tz, "weekly-summary", bot, chatId, ct);
+                await SendSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, tz, "weekly-summary", chatId, ct);
             }
         }
     }
 
-    private static async Task SendSummaryAsync(ContextService contextService, InstructionService instructionService, SkillInstructionService skillInstructionService, ISummarizationService summarizer, TimeZoneInfo tz, string taskName, ITelegramBotClient? bot, string? chatId, CancellationToken ct)
+    /// <summary>
+    /// Parse CronOrInterval as interval in minutes. Supports:
+    /// - Plain number: "60" = every 60 minutes
+    /// - Cron-like: "0 */1 * * *" = extract interval from */N pattern, defaults to 60
+    /// </summary>
+    private static int ParseIntervalMinutes(string? cronOrInterval)
     {
-        var items = taskName switch
+        if (string.IsNullOrWhiteSpace(cronOrInterval))
+            return 60; // Default: hourly
+
+        var trimmed = cronOrInterval.Trim();
+
+        // Try plain integer first
+        if (int.TryParse(trimmed, out var plainMinutes) && plainMinutes > 0)
+            return plainMinutes;
+
+        // Try to extract from cron-like pattern "0 */N * * *" or similar
+        var match = System.Text.RegularExpressions.Regex.Match(trimmed, @"\*/(\d+)");
+        if (match.Success && int.TryParse(match.Groups[1].Value, out var cronInterval) && cronInterval > 0)
+            return cronInterval * 60; // Assume it's hours, convert to minutes
+
+        // Default to hourly
+        return 60;
+    }
+
+    private async Task SendSummaryAsync(ContextService contextService, InstructionService instructionService, SkillInstructionService skillInstructionService, ISummarizationService summarizer, TimeZoneInfo tz, string taskName, string? chatId, CancellationToken ct)
+    {
+        var (start, end) = taskName switch
         {
-            "daily-summary" => await GetDailyItemsAsync(contextService, tz, ct),
-            "weekly-summary" => await GetWeeklyItemsAsync(contextService, tz, ct),
-            _ => await contextService.GetRelevantAsync(daysBack: 7, take: 200, ct: ct)
+            "daily-summary" => TimeWindowHelper.GetDailyWindow(tz),
+            "weekly-summary" => TimeWindowHelper.GetWeeklyWindow(tz),
+            _ => TimeWindowHelper.GetDailyWindow(tz)
         };
+
+        var items = await contextService.GetForWindowAsync(start, end, take: taskName == "weekly-summary" ? 300 : 200, ct: ct);
 
         var sources = items.Select(x => x.Source).Distinct().ToArray();
         var instructionsBySource = await instructionService.GetBySourcesAsync(sources, ct);
@@ -106,39 +140,10 @@ public class SchedulerService : BackgroundService
         var period = taskName.StartsWith("weekly", StringComparison.OrdinalIgnoreCase) ? "weekly" : "daily";
         var prompt = $"Skill: summary\nPeriod: {period}\nOutput a concise agenda with actionable highlights.\n" + (string.IsNullOrWhiteSpace(custom) ? string.Empty : "\n" + custom.Trim());
         var summary = await summarizer.SummarizeAsync(items, instructionsBySource, taskName, prompt, ct);
-        if (bot != null && !string.IsNullOrWhiteSpace(chatId))
+        if (_bot != null && !string.IsNullOrWhiteSpace(chatId))
         {
-            await bot.SendTextMessageAsync(chatId, summary, cancellationToken: ct);
+            await _bot.SendTextMessageAsync(chatId, summary, cancellationToken: ct);
         }
     }
-
-    private static Task<List<ContextItem>> GetDailyItemsAsync(ContextService contextService, TimeZoneInfo tz, CancellationToken ct)
-    {
-        var nowUtc = DateTimeOffset.UtcNow;
-        var localNow = TimeZoneInfo.ConvertTime(nowUtc, tz);
-
-        var localStart = new DateTime(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, DateTimeKind.Unspecified);
-        var startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, tz);
-        var endUtc = TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), tz);
-
-        return contextService.GetForWindowAsync(new DateTimeOffset(startUtc, TimeSpan.Zero), new DateTimeOffset(endUtc, TimeSpan.Zero), take: 200, ct: ct);
-    }
-
-    private static Task<List<ContextItem>> GetWeeklyItemsAsync(ContextService contextService, TimeZoneInfo tz, CancellationToken ct)
-    {
-        var nowUtc = DateTimeOffset.UtcNow;
-        var localNow = TimeZoneInfo.ConvertTime(nowUtc, tz);
-
-        var localTodayStart = new DateTime(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, DateTimeKind.Unspecified);
-
-        // Week = Monday..Monday (exclusive), in the configured timezone.
-        var diff = ((7 + (int)localNow.DayOfWeek - (int)DayOfWeek.Monday) % 7);
-        var localWeekStart = localTodayStart.AddDays(-diff);
-        var localWeekEnd = localWeekStart.AddDays(7);
-
-        var weekStartUtc = TimeZoneInfo.ConvertTimeToUtc(localWeekStart, tz);
-        var weekEndUtc = TimeZoneInfo.ConvertTimeToUtc(localWeekEnd, tz);
-
-        return contextService.GetForWindowAsync(new DateTimeOffset(weekStartUtc, TimeSpan.Zero), new DateTimeOffset(weekEndUtc, TimeSpan.Zero), take: 300, ct: ct);
-    }
 }
+

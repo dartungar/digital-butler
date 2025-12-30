@@ -1,4 +1,5 @@
 using DigitalButler.Context.Repositories;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace DigitalButler.Context;
@@ -9,11 +10,13 @@ public sealed class TimeZoneService
 
     private readonly ButlerOptions _options;
     private readonly AppSettingsRepository _repo;
+    private readonly ILogger<TimeZoneService> _logger;
 
-    public TimeZoneService(IOptions<ButlerOptions> options, AppSettingsRepository repo)
+    public TimeZoneService(IOptions<ButlerOptions> options, AppSettingsRepository repo, ILogger<TimeZoneService> logger)
     {
         _options = options.Value;
         _repo = repo;
+        _logger = logger;
     }
 
     public string? GetConfiguredTimeZoneIdOverride()
@@ -59,8 +62,9 @@ public sealed class TimeZoneService
         {
             return TimeZoneInfo.FindSystemTimeZoneById(id);
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Invalid timezone '{TimeZoneId}', falling back to UTC", id);
             return TimeZoneInfo.Utc;
         }
     }

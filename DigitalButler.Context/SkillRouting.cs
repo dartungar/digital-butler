@@ -257,7 +257,11 @@ Answer: activities
     }
 }
 
-internal static class OpenAiEndpoint
+/// <summary>
+/// Shared helper for OpenAI Responses API endpoint resolution and text extraction.
+/// Used by both OpenAiSummarizationService and OpenAiSkillRouter.
+/// </summary>
+public static class OpenAiEndpoint
 {
     public static string ResolveEndpoint(string? baseUrl)
     {

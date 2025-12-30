@@ -437,33 +437,15 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
 
     private static Task<List<ContextItem>> GetDailyItemsAsync(ContextService contextService, TimeZoneInfo tz, CancellationToken ct)
     {
-        var nowUtc = DateTimeOffset.UtcNow;
-        var localNow = TimeZoneInfo.ConvertTime(nowUtc, tz);
-
-        var localStart = new DateTime(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, DateTimeKind.Unspecified);
-        var startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, tz);
-        var endUtc = TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), tz);
-
+        var (start, end) = TimeWindowHelper.GetDailyWindow(tz);
         // Pull enough rows to avoid a single source starving others.
-        return contextService.GetForWindowAsync(new DateTimeOffset(startUtc, TimeSpan.Zero), new DateTimeOffset(endUtc, TimeSpan.Zero), take: 300, ct: ct);
+        return contextService.GetForWindowAsync(start, end, take: 300, ct: ct);
     }
 
     private static Task<List<ContextItem>> GetWeeklyItemsAsync(ContextService contextService, TimeZoneInfo tz, CancellationToken ct)
     {
-        var nowUtc = DateTimeOffset.UtcNow;
-        var localNow = TimeZoneInfo.ConvertTime(nowUtc, tz);
-
-        var localTodayStart = new DateTime(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, DateTimeKind.Unspecified);
-
-        // Week = Monday..Monday (exclusive), in the configured timezone.
-        var diff = ((7 + (int)localNow.DayOfWeek - (int)DayOfWeek.Monday) % 7);
-        var localWeekStart = localTodayStart.AddDays(-diff);
-        var localWeekEnd = localWeekStart.AddDays(7);
-
-        var weekStartUtc = TimeZoneInfo.ConvertTimeToUtc(localWeekStart, tz);
-        var weekEndUtc = TimeZoneInfo.ConvertTimeToUtc(localWeekEnd, tz);
-
-        return contextService.GetForWindowAsync(new DateTimeOffset(weekStartUtc, TimeSpan.Zero), new DateTimeOffset(weekEndUtc, TimeSpan.Zero), take: 500, ct: ct);
+        var (start, end) = TimeWindowHelper.GetWeeklyWindow(tz);
+        return contextService.GetForWindowAsync(start, end, take: 500, ct: ct);
     }
 
     private static string TruncateForTelegram(string text, int maxLen = 3500)

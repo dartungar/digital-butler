@@ -15,6 +15,7 @@ using DigitalButler.Telegram;
 using DigitalButler.Web;
 using System.IO;
 using System.Text.RegularExpressions;
+using Telegram.Bot;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -162,18 +163,16 @@ builder.Services.AddScoped<PersonalContextSource>();
 builder.Services.AddHttpClient<GoogleCalendarContextSource>();
 builder.Services.AddScoped<GmailContextSource>();
 
-// Updaters: register one updater per external source so schedules can target them.
-builder.Services.AddScoped<IContextUpdater>(sp => new ContextUpdater(
-    sp.GetRequiredService<GoogleCalendarContextSource>(),
-    sp.GetRequiredService<ContextRepository>(),
-    sp.GetRequiredService<ILogger<ContextUpdater>>()
-));
+// Context updater registry - allows lookup by source
+builder.Services.AddScoped<IContextUpdaterRegistry, ContextUpdaterRegistry>();
 
-builder.Services.AddScoped<IContextUpdater>(sp => new ContextUpdater(
-    sp.GetRequiredService<GmailContextSource>(),
-    sp.GetRequiredService<ContextRepository>(),
-    sp.GetRequiredService<ILogger<ContextUpdater>>()
-));
+// TelegramBotClient singleton - reused by scheduler instead of recreating each tick
+// Registered as optional (null if no token configured)
+var telegramToken = builder.Configuration["TELEGRAM_BOT_TOKEN"];
+if (!string.IsNullOrWhiteSpace(telegramToken))
+{
+    builder.Services.AddSingleton<ITelegramBotClient>(new TelegramBotClient(telegramToken));
+}
 
 builder.Services.AddScoped<ContextService>();
 builder.Services.AddScoped<InstructionService>();
@@ -181,6 +180,7 @@ builder.Services.AddScoped<SkillInstructionService>();
 builder.Services.AddScoped<AiTaskSettingsService>();
 builder.Services.AddScoped<TimeZoneService>();
 builder.Services.AddSingleton<IManualSyncRunner, ManualSyncRunner>();
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
@@ -197,6 +197,8 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
+
+app.MapHealthChecks("/health").AllowAnonymous();
 
 app.MapPost("/login", async (HttpContext http) =>
 {

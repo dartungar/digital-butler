@@ -4,7 +4,7 @@ namespace DigitalButler.Web;
 
 public sealed class ManualSyncRunner : IManualSyncRunner
 {
-    private static readonly SemaphoreSlim Mutex = new(1, 1);
+    private readonly SemaphoreSlim _mutex = new(1, 1);
     private readonly IServiceScopeFactory _scopeFactory;
 
     public ManualSyncRunner(IServiceScopeFactory scopeFactory)
@@ -15,11 +15,12 @@ public sealed class ManualSyncRunner : IManualSyncRunner
     public async Task<ManualSyncResult> RunAllAsync(CancellationToken ct = default)
     {
         var startedAt = DateTimeOffset.UtcNow;
-        await Mutex.WaitAsync(ct);
+        await _mutex.WaitAsync(ct);
         try
         {
             using var scope = _scopeFactory.CreateScope();
-            var updaters = scope.ServiceProvider.GetServices<IContextUpdater>().ToList();
+            var registry = scope.ServiceProvider.GetRequiredService<IContextUpdaterRegistry>();
+            var updaters = registry.GetAll().ToList();
 
             var messages = new List<string>();
             var failures = 0;
@@ -43,7 +44,7 @@ public sealed class ManualSyncRunner : IManualSyncRunner
         }
         finally
         {
-            Mutex.Release();
+            _mutex.Release();
         }
     }
 }

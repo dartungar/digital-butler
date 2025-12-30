@@ -52,6 +52,9 @@ Do not invent items that are not present.
             .OrderBy(g => g.Key)
             .ToArray();
 
+        _logger.LogDebug("AI Request - Task: {Task}, Model: {Model}, SourceCount: {SourceCount}, TotalItems: {ItemCount}",
+            taskName, settings.Model, groups.Length, items.Count());
+
         if (groups.Length == 0)
         {
             return string.Empty;
@@ -120,7 +123,7 @@ Do not invent items that are not present.
     {
         var systemPrompt = BuildPerSourceSystemPrompt(source, perSourceInstructions, skillInstructions);
         var prompt = BuildPromptForOneSource(source, items, taskName);
-        var endpoint = ResolveEndpoint(settings.BaseUrl);
+        var endpoint = OpenAiEndpoint.ResolveEndpoint(settings.BaseUrl);
         if (!endpoint.Contains("/responses", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException($"Only the OpenAI Responses API is supported. Configure AI_BASE_URL (or task ProviderUrl) to point to '/v1/responses'. Resolved endpoint: {endpoint}");
@@ -181,7 +184,7 @@ Do not invent items that are not present.
 
         using var doc = JsonDocument.Parse(rawBody);
         var root = doc.RootElement;
-        var text = ExtractResponsesText(root);
+        var text = OpenAiEndpoint.ExtractResponsesText(root);
 
         string? incompleteReason = null;
         if (root.TryGetProperty("incomplete_details", out var details) && details.ValueKind == JsonValueKind.Object &&
@@ -191,125 +194,6 @@ Do not invent items that are not present.
         }
 
         return (text, rawBody, incompleteReason);
-    }
-
-    private static string ResolveEndpoint(string? baseUrl)
-    {
-        const string defaultEndpoint = "https://api.openai.com/v1/responses";
-        if (string.IsNullOrWhiteSpace(baseUrl))
-        {
-            return defaultEndpoint;
-        }
-
-        var trimmed = baseUrl.Trim();
-
-        if (trimmed.Contains("/chat/completions", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("/v1/chat/completions is not supported. Use the OpenAI Responses API endpoint: /v1/responses");
-        }
-
-        // If caller provided a full endpoint already, use it.
-        if (trimmed.Contains("/responses", StringComparison.OrdinalIgnoreCase))
-        {
-            return trimmed;
-        }
-
-        // Treat it as a base (host or host+v1).
-        // Default to responses.
-        if (trimmed.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
-        {
-            return trimmed + "/responses";
-        }
-
-        if (trimmed.EndsWith("/v1/", StringComparison.OrdinalIgnoreCase))
-        {
-            return trimmed + "responses";
-        }
-
-        if (trimmed.EndsWith("/", StringComparison.OrdinalIgnoreCase))
-        {
-            return trimmed + "v1/responses";
-        }
-
-        return trimmed + "/v1/responses";
-    }
-
-    private static string ExtractResponsesText(JsonElement json)
-    {
-        // Newer Responses API often includes a convenience string.
-        if (json.TryGetProperty("output_text", out var outputText) && outputText.ValueKind == JsonValueKind.String)
-        {
-            return outputText.GetString() ?? string.Empty;
-        }
-
-        // Some implementations return a different envelope; attempt best-effort fallback.
-        // (We still require using /responses; this is just parsing.)
-        if (json.TryGetProperty("choices", out var choices) && choices.ValueKind == JsonValueKind.Array)
-        {
-            try
-            {
-                var content = choices[0].GetProperty("message").GetProperty("content").GetString();
-                if (!string.IsNullOrWhiteSpace(content))
-                {
-                    return content;
-                }
-            }
-            catch
-            {
-                // ignore and continue
-            }
-        }
-
-        // Otherwise, walk the structured output.
-        if (!json.TryGetProperty("output", out var output) || output.ValueKind != JsonValueKind.Array)
-        {
-            return string.Empty;
-        }
-
-        var sb = new StringBuilder();
-        foreach (var item in output.EnumerateArray())
-        {
-            if (item.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var part in content.EnumerateArray())
-                {
-                    var t = TryExtractText(part);
-                    if (!string.IsNullOrWhiteSpace(t))
-                    {
-                        if (sb.Length > 0) sb.AppendLine();
-                        sb.Append(t.Trim());
-                    }
-                }
-            }
-        }
-
-        return sb.ToString().Trim();
-    }
-
-    private static string? TryExtractText(JsonElement part)
-    {
-        // Typical: {"type":"output_text","text":"..."}
-        if (part.TryGetProperty("text", out var text))
-        {
-            if (text.ValueKind == JsonValueKind.String)
-            {
-                return text.GetString();
-            }
-
-            // Some schemas nest: {"text": {"value": "..."}}
-            if (text.ValueKind == JsonValueKind.Object && text.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.String)
-            {
-                return value.GetString();
-            }
-        }
-
-        // Alternative: {"type":"output_text","content":"..."}
-        if (part.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.String)
-        {
-            return content.GetString();
-        }
-
-        return null;
     }
 
     private static string TruncateForLogs(string value, int maxLen)

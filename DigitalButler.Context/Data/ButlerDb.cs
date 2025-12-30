@@ -13,7 +13,10 @@ public sealed class SqliteButlerDb : IButlerDb
 
     public SqliteButlerDb(string connectionString)
     {
-        _connectionString = connectionString;
+        // Enable connection pooling for better performance
+        _connectionString = connectionString.Contains("Pooling=", StringComparison.OrdinalIgnoreCase)
+            ? connectionString
+            : connectionString + ";Pooling=True";
     }
 
     public async Task<SqliteConnection> OpenAsync(CancellationToken ct = default)

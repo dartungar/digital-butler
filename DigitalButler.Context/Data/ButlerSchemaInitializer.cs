@@ -94,6 +94,8 @@ public sealed class ButlerSchemaInitializer
             """
             CREATE UNIQUE INDEX IF NOT EXISTS IX_AiTaskSettings_TaskName ON AiTaskSettings (TaskName);
             CREATE INDEX IF NOT EXISTS IX_ContextItems_Source_ExternalId ON ContextItems (Source, ExternalId);
+            CREATE INDEX IF NOT EXISTS IX_ContextItems_RelevantDate ON ContextItems (RelevantDate);
+            CREATE INDEX IF NOT EXISTS IX_ContextItems_IsTimeless ON ContextItems (IsTimeless);
             CREATE UNIQUE INDEX IF NOT EXISTS IX_Schedules_Source ON Schedules (Source);
             CREATE INDEX IF NOT EXISTS IX_SummarySchedules_IsWeekly_DayOfWeek ON SummarySchedules (IsWeekly, DayOfWeek);
             CREATE UNIQUE INDEX IF NOT EXISTS IX_GoogleCalendarFeeds_Url ON GoogleCalendarFeeds (Url);
