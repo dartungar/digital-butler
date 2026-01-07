@@ -1,5 +1,5 @@
 using DigitalButler.Context;
-using DigitalButler.Data;
+using DigitalButler.Common;
 using DigitalButler.Skills;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
@@ -18,6 +18,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
     private readonly IServiceProvider _services;
     private readonly string _token;
     private readonly long _allowedUserId;
+    private readonly TimeSpan _startupPingTimeout;
     private TelegramBotClient? _bot;
     private CancellationTokenSource? _cts;
     private Task? _runLoop;
@@ -27,6 +28,14 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         _logger = logger;
         _services = services;
         _token = config["TELEGRAM_BOT_TOKEN"] ?? throw new InvalidOperationException("TELEGRAM_BOT_TOKEN not configured");
+
+        var timeoutSeconds = 30;
+        var timeoutStr = config["TELEGRAM_STARTUP_TIMEOUT_SECONDS"];
+        if (!string.IsNullOrWhiteSpace(timeoutStr) && int.TryParse(timeoutStr, out var parsed) && parsed > 0)
+        {
+            timeoutSeconds = parsed;
+        }
+        _startupPingTimeout = TimeSpan.FromSeconds(timeoutSeconds);
         
         var allowedUserIdStr = config["TELEGRAM_ALLOWED_USER_ID"];
         _allowedUserId = string.IsNullOrWhiteSpace(allowedUserIdStr) 
@@ -86,7 +95,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
 
                 // Avoid hanging forever on startup (TLS/network issues). Keep it short and retry.
                 using var pingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                pingCts.CancelAfter(TimeSpan.FromSeconds(10));
+                pingCts.CancelAfter(_startupPingTimeout);
 
                 var me = await _bot.GetMeAsync(cancellationToken: pingCts.Token);
                 _logger.LogInformation("Bot connected as {Username}", me.Username);
@@ -103,6 +112,27 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 return;
+            }
+            catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+            {
+                // Most commonly a timeout from pingCts.CancelAfter(...).
+                _logger.LogWarning(
+                    "Telegram bot startup ping cancelled/timed out after {TimeoutSeconds}s; retrying in {Delay}. Error: {ErrorType}",
+                    (int)_startupPingTimeout.TotalSeconds,
+                    delay,
+                    ex.GetType().Name);
+
+                try
+                {
+                    await Task.Delay(delay, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                // Exponential backoff up to 60s.
+                delay = TimeSpan.FromSeconds(Math.Min(60, delay.TotalSeconds * 2));
             }
             catch (Exception ex)
             {

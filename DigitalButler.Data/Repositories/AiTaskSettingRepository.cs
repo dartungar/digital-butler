@@ -1,4 +1,5 @@
 using Dapper;
+using DigitalButler.Common;
 
 namespace DigitalButler.Data.Repositories;
 

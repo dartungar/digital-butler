@@ -9,6 +9,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\DigitalButler.Common\DigitalButler.Common.csproj" />
         <ProjectReference Include="..\DigitalButler.Data\DigitalButler.Data.csproj" />
     </ItemGroup>
 

@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Options;
-using DigitalButler.Data;
+using DigitalButler.Common;
 using DigitalButler.Data.Repositories;
 
 namespace DigitalButler.Skills;

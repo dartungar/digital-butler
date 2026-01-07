@@ -1,4 +1,5 @@
 using DigitalButler.Context;
+using DigitalButler.Common;
 using DigitalButler.Data;
 using DigitalButler.Data.Repositories;
 using DigitalButler.Skills;
@@ -156,7 +157,6 @@ builder.Services.Configure<GmailOptions>(builder.Configuration.GetSection("Gmail
 builder.Services.AddHttpClient<ISummarizationService, OpenAiSummarizationService>();
 builder.Services.AddHttpClient<ISkillRouter, OpenAiSkillRouter>();
 builder.Services.AddScoped<AiSettingsResolver>();
-builder.Services.AddHostedService<BotService>();
 builder.Services.AddHostedService<SchedulerService>();
 
 // Context sources
@@ -170,6 +170,11 @@ builder.Services.AddScoped<IContextUpdaterRegistry, ContextUpdaterRegistry>();
 // TelegramBotClient singleton - reused by scheduler instead of recreating each tick
 // Registered as optional (null if no token configured)
 var telegramToken = builder.Configuration["TELEGRAM_BOT_TOKEN"];
+var telegramAllowedUserId = builder.Configuration["TELEGRAM_ALLOWED_USER_ID"];
+if (!string.IsNullOrWhiteSpace(telegramToken) && !string.IsNullOrWhiteSpace(telegramAllowedUserId))
+{
+    builder.Services.AddHostedService<BotService>();
+}
 if (!string.IsNullOrWhiteSpace(telegramToken))
 {
     builder.Services.AddSingleton<ITelegramBotClient>(new TelegramBotClient(telegramToken));

@@ -10,6 +10,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DigitalButler.Data", "Digit
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DigitalButler.Skills", "DigitalButler.Skills\DigitalButler.Skills.csproj", "{C9D2E3F4-A5B6-4C7D-8E9F-0A1B2C3D4E5F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DigitalButler.Common", "DigitalButler.Common\DigitalButler.Common.csproj", "{D6A6C7D1-6E52-4AA5-9B07-1C6A0E52B6B4}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -36,5 +38,9 @@ Global
 		{C9D2E3F4-A5B6-4C7D-8E9F-0A1B2C3D4E5F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C9D2E3F4-A5B6-4C7D-8E9F-0A1B2C3D4E5F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C9D2E3F4-A5B6-4C7D-8E9F-0A1B2C3D4E5F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D6A6C7D1-6E52-4AA5-9B07-1C6A0E52B6B4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D6A6C7D1-6E52-4AA5-9B07-1C6A0E52B6B4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D6A6C7D1-6E52-4AA5-9B07-1C6A0E52B6B4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D6A6C7D1-6E52-4AA5-9B07-1C6A0E52B6B4}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
