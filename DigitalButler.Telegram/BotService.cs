@@ -360,9 +360,9 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         };
     }
 
-    private static async Task<string?> GetSkillInstructionsAsync(SkillInstructionService svc, ButlerSkill skill, CancellationToken ct)
+    private static async Task<SkillInstruction?> GetSkillConfigAsync(SkillInstructionService svc, ButlerSkill skill, CancellationToken ct)
     {
-        var dict = await svc.GetBySkillsAsync(new[] { skill }, ct);
+        var dict = await svc.GetFullBySkillsAsync(new[] { skill }, ct);
         return dict.TryGetValue(skill, out var v) ? v : null;
     }
 
@@ -381,9 +381,13 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             ? await GetWeeklyItemsAsync(contextService, tz, ct)
             : await GetDailyItemsAsync(contextService, tz, ct);
 
+        var cfg = await GetSkillConfigAsync(skillInstructionService, ButlerSkill.Summary, ct);
+        var allowedMask = SkillContextDefaults.ResolveSourcesMask(ButlerSkill.Summary, cfg?.ContextSourcesMask ?? -1);
+        items = items.Where(x => ContextSourceMask.Contains(allowedMask, x.Source)).ToList();
+
         var sources = items.Select(x => x.Source).Distinct().ToArray();
         var instructionsBySource = await instructionService.GetBySourcesAsync(sources, ct);
-        var skillInstructions = await GetSkillInstructionsAsync(skillInstructionService, ButlerSkill.Summary, ct);
+        var skillInstructions = cfg?.Content;
         var period = weekly ? "weekly" : "daily";
         return await summarizer.SummarizeAsync(items, instructionsBySource, taskName, BuildSummarySkillPrompt(period, skillInstructions), ct);
     }
@@ -397,12 +401,16 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         CancellationToken ct)
     {
         var tz = await tzService.GetTimeZoneInfoAsync(ct);
-        var items = await GetPersonalRelevantItemsAsync(contextService, tz, daysBack: 30, take: 250, ct);
+        var items = await contextService.GetRelevantAsync(daysBack: 30, take: 250, ct: ct);
+
+        var cfg = await GetSkillConfigAsync(skillInstructionService, ButlerSkill.Motivation, ct);
+        var allowedMask = SkillContextDefaults.ResolveSourcesMask(ButlerSkill.Motivation, cfg?.ContextSourcesMask ?? -1);
+        items = items.Where(x => ContextSourceMask.Contains(allowedMask, x.Source)).ToList();
+
         // Motivation should be driven by Personal context and per-skill instructions only.
         // Do NOT apply per-source instructions (e.g. Google Calendar formatting) to this skill.
         var instructionsBySource = new Dictionary<ContextSource, string>();
-        var skillInstructions = await GetSkillInstructionsAsync(skillInstructionService, ButlerSkill.Motivation, ct);
-        var prompt = BuildMotivationSkillPrompt(skillInstructions);
+        var prompt = BuildMotivationSkillPrompt(cfg?.Content);
         return await summarizer.SummarizeAsync(items, instructionsBySource, "motivation", prompt, ct);
     }
 
@@ -415,12 +423,16 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         CancellationToken ct)
     {
         var tz = await tzService.GetTimeZoneInfoAsync(ct);
-        var items = await GetPersonalRelevantItemsAsync(contextService, tz, daysBack: 14, take: 250, ct);
+        var items = await contextService.GetRelevantAsync(daysBack: 14, take: 250, ct: ct);
+
+        var cfg = await GetSkillConfigAsync(skillInstructionService, ButlerSkill.Activities, ct);
+        var allowedMask = SkillContextDefaults.ResolveSourcesMask(ButlerSkill.Activities, cfg?.ContextSourcesMask ?? -1);
+        items = items.Where(x => ContextSourceMask.Contains(allowedMask, x.Source)).ToList();
+
         // Activities should be driven by Personal context and per-skill instructions only.
         // Do NOT apply per-source instructions (e.g. Google Calendar formatting) to this skill.
         var instructionsBySource = new Dictionary<ContextSource, string>();
-        var skillInstructions = await GetSkillInstructionsAsync(skillInstructionService, ButlerSkill.Activities, ct);
-        var prompt = BuildActivitiesSkillPrompt(skillInstructions);
+        var prompt = BuildActivitiesSkillPrompt(cfg?.Content);
         return await summarizer.SummarizeAsync(items, instructionsBySource, "activities", prompt, ct);
     }
 
@@ -468,13 +480,6 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             sb.AppendLine(custom.Trim());
         }
         return sb.ToString();
-    }
-
-    private static async Task<List<ContextItem>> GetPersonalRelevantItemsAsync(ContextService contextService, TimeZoneInfo tz, int daysBack, int take, CancellationToken ct)
-    {
-        // GetRelevantAsync includes timeless items, then we filter to personal.
-        var items = await contextService.GetRelevantAsync(daysBack: daysBack, take: take, ct: ct);
-        return items.Where(x => x.Source == ContextSource.Personal).ToList();
     }
 
     private static Task SendWithKeyboardAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken cancellationToken)

@@ -40,4 +40,7 @@ public class SkillInstructionService
 
     public Task<Dictionary<ButlerSkill, string>> GetBySkillsAsync(IEnumerable<ButlerSkill> skills, CancellationToken ct = default)
         => _repo.GetBySkillsAsync(skills, ct);
+
+    public Task<Dictionary<ButlerSkill, SkillInstruction>> GetFullBySkillsAsync(IEnumerable<ButlerSkill> skills, CancellationToken ct = default)
+        => _repo.GetFullBySkillsAsync(skills, ct);
 }

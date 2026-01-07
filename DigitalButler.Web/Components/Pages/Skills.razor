@@ -21,6 +21,7 @@ else
                     <thead>
                         <tr>
                             <th>Skill</th>
+                            <th>Context Sources</th>
                             <th>Content</th>
                         </tr>
                     </thead>
@@ -29,6 +30,17 @@ else
                     {
                         <tr>
                             <td style="white-space:nowrap;">@item.Skill</td>
+                            <td style="min-width:240px;">
+                                @foreach (var source in Enum.GetValues<global::DigitalButler.Common.ContextSource>())
+                                {
+                                    <label class="checkbox" style="display:block;">
+                                        <input type="checkbox"
+                                               checked="@IsSourceEnabled(item, source)"
+                                               @onchange="(e) => SetSourceEnabled(item, source, (bool)(e.Value ?? false))" />
+                                        @source
+                                    </label>
+                                }
+                            </td>
                             <td>
                                 <InputTextArea class="textarea" style="min-width:400px;" @bind-Value="item.Content" />
                             </td>
@@ -54,9 +66,29 @@ else
         {
             if (_items.All(x => x.Skill != skill))
             {
-                _items.Add(new global::DigitalButler.Common.SkillInstruction { Skill = skill, Content = string.Empty });
+                _items.Add(new global::DigitalButler.Common.SkillInstruction { Skill = skill, Content = string.Empty, ContextSourcesMask = -1 });
             }
         }
+
+        // Materialize defaults for legacy rows so the UI shows the effective configuration.
+        foreach (var item in _items)
+        {
+            item.ContextSourcesMask = global::DigitalButler.Common.SkillContextDefaults.ResolveSourcesMask(item.Skill, item.ContextSourcesMask);
+        }
+    }
+
+    private static bool IsSourceEnabled(global::DigitalButler.Common.SkillInstruction item, global::DigitalButler.Common.ContextSource source)
+    {
+        var mask = global::DigitalButler.Common.SkillContextDefaults.ResolveSourcesMask(item.Skill, item.ContextSourcesMask);
+        return global::DigitalButler.Common.ContextSourceMask.Contains(mask, source);
+    }
+
+    private static void SetSourceEnabled(global::DigitalButler.Common.SkillInstruction item, global::DigitalButler.Common.ContextSource source, bool enabled)
+    {
+        // If the row is still "defaults", expand it before toggling.
+        var mask = global::DigitalButler.Common.SkillContextDefaults.ResolveSourcesMask(item.Skill, item.ContextSourcesMask);
+        var bit = global::DigitalButler.Common.ContextSourceMask.For(source);
+        item.ContextSourcesMask = enabled ? (mask | bit) : (mask & ~bit);
     }
 
     private async Task SaveAsync()

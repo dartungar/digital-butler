@@ -53,6 +53,7 @@ public sealed class ButlerSchemaInitializer
                 Id TEXT NOT NULL PRIMARY KEY,
                 Skill INTEGER NOT NULL,
                 Content TEXT NOT NULL,
+                ContextSourcesMask INTEGER NOT NULL DEFAULT -1,
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL
             );
@@ -88,6 +89,17 @@ public sealed class ButlerSchemaInitializer
             );
             """
         );
+
+        // Lightweight migrations (idempotent). SQLite doesn't support IF NOT EXISTS for ADD COLUMN.
+        // Ignore the error if the column already exists.
+        try
+        {
+            await conn.ExecuteAsync("ALTER TABLE SkillInstructions ADD COLUMN ContextSourcesMask INTEGER NOT NULL DEFAULT -1;");
+        }
+        catch
+        {
+            // Intentionally ignored
+        }
 
         // Indexes (idempotent)
         await conn.ExecuteAsync(

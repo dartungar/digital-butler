@@ -61,8 +61,40 @@ public class SkillInstruction
     public Guid Id { get; set; }
     public ButlerSkill Skill { get; set; }
     public string Content { get; set; } = string.Empty;
+    /// <summary>
+    /// Bitmask of allowed <see cref="ContextSource"/> values for this skill.
+    /// Use -1 to indicate "use defaults" (backwards-compatible behavior).
+    /// </summary>
+    public int ContextSourcesMask { get; set; } = -1;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+}
+
+public static class ContextSourceMask
+{
+    public static int For(ContextSource source)
+        => 1 << (int)source;
+
+    public static int All()
+        => Enum.GetValues<ContextSource>().Aggregate(0, (mask, s) => mask | For(s));
+
+    public static bool Contains(int mask, ContextSource source)
+        => (mask & For(source)) != 0;
+}
+
+public static class SkillContextDefaults
+{
+    public static int DefaultSourcesMask(ButlerSkill skill)
+        => skill switch
+        {
+            ButlerSkill.Summary => ContextSourceMask.All(),
+            ButlerSkill.Motivation => ContextSourceMask.For(ContextSource.Personal),
+            ButlerSkill.Activities => ContextSourceMask.For(ContextSource.Personal),
+            _ => ContextSourceMask.All()
+        };
+
+    public static int ResolveSourcesMask(ButlerSkill skill, int configuredMask)
+        => configuredMask < 0 ? DefaultSourcesMask(skill) : configuredMask;
 }
 
 public class AiTaskSetting

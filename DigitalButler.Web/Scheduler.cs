@@ -135,10 +135,14 @@ public class SchedulerService : BackgroundService
 
         var items = await contextService.GetForWindowAsync(start, end, take: taskName == "weekly-summary" ? 300 : 200, ct: ct);
 
+        var cfg = await skillInstructionService.GetFullBySkillsAsync(new[] { ButlerSkill.Summary }, ct);
+        cfg.TryGetValue(ButlerSkill.Summary, out var summaryCfg);
+        var allowedMask = SkillContextDefaults.ResolveSourcesMask(ButlerSkill.Summary, summaryCfg?.ContextSourcesMask ?? -1);
+        items = items.Where(x => ContextSourceMask.Contains(allowedMask, x.Source)).ToList();
+
         var sources = items.Select(x => x.Source).Distinct().ToArray();
         var instructionsBySource = await instructionService.GetBySourcesAsync(sources, ct);
-        var skillInstructions = await skillInstructionService.GetBySkillsAsync(new[] { ButlerSkill.Summary }, ct);
-        skillInstructions.TryGetValue(ButlerSkill.Summary, out var custom);
+        var custom = summaryCfg?.Content;
         var period = taskName.StartsWith("weekly", StringComparison.OrdinalIgnoreCase) ? "weekly" : "daily";
         var prompt = $"Skill: summary\nPeriod: {period}\nOutput a concise agenda with actionable highlights.\n" + (string.IsNullOrWhiteSpace(custom) ? string.Empty : "\n" + custom.Trim());
         var summary = await summarizer.SummarizeAsync(items, instructionsBySource, taskName, prompt, ct);

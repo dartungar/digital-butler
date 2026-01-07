@@ -16,7 +16,7 @@ public sealed class SkillInstructionRepository
     {
         await using var conn = await _db.OpenAsync(ct);
         const string sql = """
-            SELECT Id, Skill, Content, CreatedAt, UpdatedAt
+            SELECT Id, Skill, Content, ContextSourcesMask, CreatedAt, UpdatedAt
             FROM SkillInstructions
             ORDER BY Skill;
             """;
@@ -35,7 +35,7 @@ public sealed class SkillInstructionRepository
 
         await using var conn = await _db.OpenAsync(ct);
         const string sql = """
-            SELECT Id, Skill, Content, CreatedAt, UpdatedAt
+            SELECT Id, Skill, Content, ContextSourcesMask, CreatedAt, UpdatedAt
             FROM SkillInstructions
             WHERE Skill IN @Skills;
             """;
@@ -44,6 +44,27 @@ public sealed class SkillInstructionRepository
         return rows
             .Select(Map)
             .ToDictionary(x => x.Skill, x => x.Content ?? string.Empty);
+    }
+
+    public async Task<Dictionary<ButlerSkill, SkillInstruction>> GetFullBySkillsAsync(IEnumerable<ButlerSkill> skills, CancellationToken ct = default)
+    {
+        var list = skills.Distinct().ToArray();
+        if (list.Length == 0)
+        {
+            return new Dictionary<ButlerSkill, SkillInstruction>();
+        }
+
+        await using var conn = await _db.OpenAsync(ct);
+        const string sql = """
+            SELECT Id, Skill, Content, ContextSourcesMask, CreatedAt, UpdatedAt
+            FROM SkillInstructions
+            WHERE Skill IN @Skills;
+            """;
+
+        var rows = await conn.QueryAsync<Row>(sql, new { Skills = list.Select(x => (int)x).ToArray() });
+        return rows
+            .Select(Map)
+            .ToDictionary(x => x.Skill, x => x);
     }
 
     public async Task ReplaceAllAsync(IEnumerable<SkillInstruction> items, CancellationToken ct = default)
@@ -68,11 +89,12 @@ public sealed class SkillInstructionRepository
             var updated = now;
 
             const string upsert = """
-                INSERT INTO SkillInstructions (Id, Skill, Content, CreatedAt, UpdatedAt)
-                VALUES (@Id, @Skill, @Content, @CreatedAt, @UpdatedAt)
+                INSERT INTO SkillInstructions (Id, Skill, Content, ContextSourcesMask, CreatedAt, UpdatedAt)
+                VALUES (@Id, @Skill, @Content, @ContextSourcesMask, @CreatedAt, @UpdatedAt)
                 ON CONFLICT(Id) DO UPDATE SET
                     Skill = excluded.Skill,
                     Content = excluded.Content,
+                    ContextSourcesMask = excluded.ContextSourcesMask,
                     UpdatedAt = excluded.UpdatedAt;
                 """;
 
@@ -81,6 +103,7 @@ public sealed class SkillInstructionRepository
                 Id = id,
                 Skill = (int)item.Skill,
                 Content = item.Content ?? string.Empty,
+                ContextSourcesMask = item.ContextSourcesMask,
                 CreatedAt = created,
                 UpdatedAt = updated
             }, tx);
@@ -94,6 +117,7 @@ public sealed class SkillInstructionRepository
         public Guid Id { get; set; }
         public int Skill { get; set; }
         public string Content { get; set; } = string.Empty;
+        public int ContextSourcesMask { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
         public DateTimeOffset UpdatedAt { get; set; }
     }
@@ -103,6 +127,7 @@ public sealed class SkillInstructionRepository
         Id = row.Id,
         Skill = (ButlerSkill)row.Skill,
         Content = row.Content,
+        ContextSourcesMask = row.ContextSourcesMask,
         CreatedAt = row.CreatedAt,
         UpdatedAt = row.UpdatedAt
     };
