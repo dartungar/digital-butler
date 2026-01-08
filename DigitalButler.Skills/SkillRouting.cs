@@ -57,12 +57,14 @@ Pick exactly one skill for the user's message:
 - summary (daily/weekly agenda)
 - motivation (motivational message based on personal context)
 - activities (suggest what to do based on energy/mood)
+- drawing_reference (find a drawing reference image)
 
 Return ONLY one of these tokens:
 summary_daily
 summary_weekly
 motivation
 activities
+drawing_reference
 
 Output rules:
 - Output the token only (no other words like "Answer:" and no punctuation).
@@ -84,6 +86,12 @@ Answer: motivation
 
 User: what should I do tonight?
 Answer: activities
+
+User: I want a drawing reference for hands
+Answer: drawing_reference
+
+User: I want to practice drawing
+Answer: drawing_reference
 """;
 
         var input = "User message:\n" + text.Trim();
@@ -131,10 +139,12 @@ Answer: activities
         else if (token.Contains("summary_weekly")) token = "summary_weekly";
         else if (token.Contains("motivation")) token = "motivation";
         else if (token.Contains("activities")) token = "activities";
+        else if (token.Contains("drawing_reference")) token = "drawing_reference";
 
         // Be tolerant of minor deviations (we still instruct the model not to abbreviate).
         if (token is "mot" or "motiv" or "motivational") token = "motivation";
         if (token is "act" or "activity") token = "activities";
+        if (token is "draw" or "drawing" or "reference" or "drawingreference" or "drawing_ref") token = "drawing_reference";
         if (token is "summary") token = "summary_daily";
 
         switch (token)
@@ -144,6 +154,9 @@ Answer: activities
                 return true;
             case "activities":
                 route = new SkillRoute(ButlerSkill.Activities, PreferWeeklySummary: false);
+                return true;
+            case "drawing_reference":
+                route = new SkillRoute(ButlerSkill.DrawingReference, PreferWeeklySummary: false);
                 return true;
             case "summary_weekly":
                 route = new SkillRoute(ButlerSkill.Summary, PreferWeeklySummary: true);

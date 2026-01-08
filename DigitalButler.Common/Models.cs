@@ -53,7 +53,8 @@ public enum ButlerSkill
 {
     Summary = 0,
     Motivation = 1,
-    Activities = 2
+    Activities = 2,
+    DrawingReference = 3
 }
 
 public class SkillInstruction

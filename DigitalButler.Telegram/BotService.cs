@@ -9,6 +9,7 @@ using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
 using Polling = Telegram.Bot.Polling;
 using Telegram.Bot.Types;
+using System.Collections.Concurrent;
 
 namespace DigitalButler.Telegram;
 
@@ -22,6 +23,10 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
     private TelegramBotClient? _bot;
     private CancellationTokenSource? _cts;
     private Task? _runLoop;
+
+    // Simple in-memory conversation state for clarifying the drawing subject.
+    // Key: chat id. Value: awaiting subject.
+    private readonly ConcurrentDictionary<long, bool> _awaitingDrawingSubject = new();
 
     public BotService(ILogger<BotService> logger, IServiceProvider services, IConfiguration config)
     {
@@ -177,6 +182,26 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         var skillRouter = scope.ServiceProvider.GetRequiredService<ISkillRouter>();
         var aiContext = scope.ServiceProvider.GetRequiredService<IAiContextAugmenter>();
         var tzService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
+        var drawingRef = scope.ServiceProvider.GetRequiredService<IDrawingReferenceService>();
+        var subjectTranslator = scope.ServiceProvider.GetRequiredService<ISubjectTranslator>();
+
+        // If we previously asked for a drawing subject, treat the next non-command message as the subject.
+        if (_awaitingDrawingSubject.TryGetValue(chatId, out var awaiting) && awaiting && !text.StartsWith("/", StringComparison.OrdinalIgnoreCase))
+        {
+            _awaitingDrawingSubject.TryRemove(chatId, out _);
+            await SendWithKeyboardAsync(bot, chatId, "Finding a drawing reference...", cancellationToken: ct);
+            try
+            {
+                var reply = await ExecuteDrawingReferenceAsync(drawingRef, subjectTranslator, text, ct);
+                await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(reply), cancellationToken: ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to generate drawing reference");
+                await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), cancellationToken: ct);
+            }
+            return;
+        }
 
         if (text.StartsWith("/start", StringComparison.OrdinalIgnoreCase) || text.StartsWith("/help", StringComparison.OrdinalIgnoreCase))
         {
@@ -186,9 +211,34 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
                 "/weekly - this week + timeless\n" +
                 "/motivation - motivational message\n" +
                 "/activities - activity suggestions\n" +
+                "/drawref <subject> - drawing reference image\n" +
                 "/add <text> - add personal context\n" +
                 "/sync - run all ingests now",
                 cancellationToken: ct);
+            return;
+        }
+
+        if (text.StartsWith("/drawref", StringComparison.OrdinalIgnoreCase) || text.StartsWith("/drawingref", StringComparison.OrdinalIgnoreCase) || text.StartsWith("/drawing_reference", StringComparison.OrdinalIgnoreCase))
+        {
+            var subject = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Skip(1).FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(subject))
+            {
+                _awaitingDrawingSubject[chatId] = true;
+                await SendWithKeyboardAsync(bot, chatId, "What do you want to draw? (e.g. \"hands\", \"a bicycle\", \"a cat\")", cancellationToken: ct);
+                return;
+            }
+
+            await SendWithKeyboardAsync(bot, chatId, "Finding a drawing reference...", cancellationToken: ct);
+            try
+            {
+                var reply = await ExecuteDrawingReferenceAsync(drawingRef, subjectTranslator, subject, ct);
+                await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(reply), cancellationToken: ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to generate /drawref");
+                await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), cancellationToken: ct);
+            }
             return;
         }
 
@@ -334,6 +384,26 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
                     var activities = await ExecuteActivitiesAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tzService, ct);
                     if (string.IsNullOrWhiteSpace(activities)) activities = "No activities available.";
                     await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(activities), cancellationToken: ct);
+                    return;
+                case ButlerSkill.DrawingReference:
+                    if (!TryExtractDrawingSubject(text, out var extracted))
+                    {
+                        _awaitingDrawingSubject[chatId] = true;
+                        await SendWithKeyboardAsync(bot, chatId, "What do you want to draw?", cancellationToken: ct);
+                        return;
+                    }
+
+                    await SendWithKeyboardAsync(bot, chatId, "Finding a drawing reference...", cancellationToken: ct);
+                    try
+                    {
+                        var reply = await ExecuteDrawingReferenceAsync(drawingRef, subjectTranslator, extracted!, ct);
+                        await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(reply), cancellationToken: ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to generate drawing reference");
+                        await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), cancellationToken: ct);
+                    }
                     return;
                 case ButlerSkill.Summary:
                 default:
@@ -519,6 +589,81 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             sb.AppendLine(custom.Trim());
         }
         return sb.ToString();
+    }
+
+    private static bool TryExtractDrawingSubject(string text, out string? subject)
+    {
+        subject = null;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var lowered = text.Trim();
+
+        // Heuristic extraction:
+        // - "draw <subject>", "drawing <subject>", "sketch <subject>"
+        // - "drawing reference for <subject>"
+        static string? After(string input, string needle)
+        {
+            var idx = input.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return null;
+            return input[(idx + needle.Length)..].Trim();
+        }
+
+        var tail = After(lowered, "drawing reference for ")
+                   ?? After(lowered, "reference for ")
+                   ?? After(lowered, "draw ")
+                   ?? After(lowered, "drawing ")
+                   ?? After(lowered, "sketch ");
+
+        if (string.IsNullOrWhiteSpace(tail))
+        {
+            return false;
+        }
+
+        // Strip leading filler words.
+        var cleaned = tail.Trim().Trim('.', '!', '?', ':', ';', ',', '"', '\'', ')', '(', '[', ']', '{', '}');
+        foreach (var stop in new[] { "some ", "a ", "an ", "the ", "my ", "any " })
+        {
+            if (cleaned.StartsWith(stop, StringComparison.OrdinalIgnoreCase))
+            {
+                cleaned = cleaned[stop.Length..].Trim();
+                break;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(cleaned) || cleaned.StartsWith("practice", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        subject = cleaned;
+        return true;
+    }
+
+    private static async Task<string> ExecuteDrawingReferenceAsync(IDrawingReferenceService svc, ISubjectTranslator translator, string subject, CancellationToken ct)
+    {
+        var original = subject.Trim();
+        var translated = await translator.TranslateToEnglishAsync(original, ct);
+        if (string.IsNullOrWhiteSpace(translated))
+        {
+            translated = original;
+        }
+
+        var result = await svc.GetReferenceAsync(translated, ct);
+        if (result is null)
+        {
+            return $"I couldn't find a drawing reference for \"{original}\". Try a different subject?";
+        }
+
+        var header = string.Equals(original, translated, StringComparison.OrdinalIgnoreCase)
+            ? $"Drawing reference for \"{original}\":"
+            : $"Drawing reference for \"{original}\" (searching: \"{translated}\"):";
+
+        return header + "\n" +
+               $"{result.Value.ImageUrl}\n" +
+               $"Photo by {result.Value.PhotographerName} on Unsplash: {result.Value.PhotoPageUrl}";
     }
 
     private static string BuildActivitiesSkillPrompt(string? custom)
