@@ -22,6 +22,7 @@ else
                         <tr>
                             <th>Skill</th>
                             <th>Context Sources</th>
+                            <th>AI Context</th>
                             <th>Content</th>
                         </tr>
                     </thead>
@@ -40,6 +41,12 @@ else
                                         @source
                                     </label>
                                 }
+                            </td>
+                            <td style="white-space:nowrap;">
+                                <label class="checkbox">
+                                    <InputCheckbox @bind-Value="item.EnableAiContext" />
+                                    Enable
+                                </label>
                             </td>
                             <td>
                                 <InputTextArea class="textarea" style="min-width:400px;" @bind-Value="item.Content" />
@@ -66,7 +73,7 @@ else
         {
             if (_items.All(x => x.Skill != skill))
             {
-                _items.Add(new global::DigitalButler.Common.SkillInstruction { Skill = skill, Content = string.Empty, ContextSourcesMask = -1 });
+                _items.Add(new global::DigitalButler.Common.SkillInstruction { Skill = skill, Content = string.Empty, ContextSourcesMask = -1, EnableAiContext = false });
             }
         }
 

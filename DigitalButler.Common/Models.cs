@@ -66,6 +66,12 @@ public class SkillInstruction
     /// Use -1 to indicate "use defaults" (backwards-compatible behavior).
     /// </summary>
     public int ContextSourcesMask { get; set; } = -1;
+
+    /// <summary>
+    /// When enabled, Butler will generate an extra AI-driven "self thought" snippet
+    /// and include it as additional context for this skill.
+    /// </summary>
+    public bool EnableAiContext { get; set; } = false;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

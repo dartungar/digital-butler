@@ -16,7 +16,7 @@ public sealed class SkillInstructionRepository
     {
         await using var conn = await _db.OpenAsync(ct);
         const string sql = """
-            SELECT Id, Skill, Content, ContextSourcesMask, CreatedAt, UpdatedAt
+            SELECT Id, Skill, Content, ContextSourcesMask, EnableAiContext, CreatedAt, UpdatedAt
             FROM SkillInstructions
             ORDER BY Skill;
             """;
@@ -35,7 +35,7 @@ public sealed class SkillInstructionRepository
 
         await using var conn = await _db.OpenAsync(ct);
         const string sql = """
-            SELECT Id, Skill, Content, ContextSourcesMask, CreatedAt, UpdatedAt
+            SELECT Id, Skill, Content, ContextSourcesMask, EnableAiContext, CreatedAt, UpdatedAt
             FROM SkillInstructions
             WHERE Skill IN @Skills;
             """;
@@ -56,7 +56,7 @@ public sealed class SkillInstructionRepository
 
         await using var conn = await _db.OpenAsync(ct);
         const string sql = """
-            SELECT Id, Skill, Content, ContextSourcesMask, CreatedAt, UpdatedAt
+            SELECT Id, Skill, Content, ContextSourcesMask, EnableAiContext, CreatedAt, UpdatedAt
             FROM SkillInstructions
             WHERE Skill IN @Skills;
             """;
@@ -89,12 +89,13 @@ public sealed class SkillInstructionRepository
             var updated = now;
 
             const string upsert = """
-                INSERT INTO SkillInstructions (Id, Skill, Content, ContextSourcesMask, CreatedAt, UpdatedAt)
-                VALUES (@Id, @Skill, @Content, @ContextSourcesMask, @CreatedAt, @UpdatedAt)
+                INSERT INTO SkillInstructions (Id, Skill, Content, ContextSourcesMask, EnableAiContext, CreatedAt, UpdatedAt)
+                VALUES (@Id, @Skill, @Content, @ContextSourcesMask, @EnableAiContext, @CreatedAt, @UpdatedAt)
                 ON CONFLICT(Id) DO UPDATE SET
                     Skill = excluded.Skill,
                     Content = excluded.Content,
                     ContextSourcesMask = excluded.ContextSourcesMask,
+                    EnableAiContext = excluded.EnableAiContext,
                     UpdatedAt = excluded.UpdatedAt;
                 """;
 
@@ -104,6 +105,7 @@ public sealed class SkillInstructionRepository
                 Skill = (int)item.Skill,
                 Content = item.Content ?? string.Empty,
                 ContextSourcesMask = item.ContextSourcesMask,
+                EnableAiContext = item.EnableAiContext ? 1 : 0,
                 CreatedAt = created,
                 UpdatedAt = updated
             }, tx);
@@ -118,6 +120,7 @@ public sealed class SkillInstructionRepository
         public int Skill { get; set; }
         public string Content { get; set; } = string.Empty;
         public int ContextSourcesMask { get; set; }
+        public int EnableAiContext { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
         public DateTimeOffset UpdatedAt { get; set; }
     }
@@ -128,6 +131,7 @@ public sealed class SkillInstructionRepository
         Skill = (ButlerSkill)row.Skill,
         Content = row.Content,
         ContextSourcesMask = row.ContextSourcesMask,
+        EnableAiContext = row.EnableAiContext != 0,
         CreatedAt = row.CreatedAt,
         UpdatedAt = row.UpdatedAt
     };

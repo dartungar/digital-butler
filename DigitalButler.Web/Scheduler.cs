@@ -48,6 +48,7 @@ public class SchedulerService : BackgroundService
         var instructionService = scope.ServiceProvider.GetRequiredService<InstructionService>();
         var skillInstructionService = scope.ServiceProvider.GetRequiredService<SkillInstructionService>();
         var summarizer = scope.ServiceProvider.GetRequiredService<ISummarizationService>();
+        var aiContext = scope.ServiceProvider.GetRequiredService<IAiContextAugmenter>();
         var nowUtc = DateTimeOffset.UtcNow;
         var tzService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
         var tz = await tzService.GetTimeZoneInfoAsync(ct);
@@ -84,7 +85,7 @@ public class SchedulerService : BackgroundService
         {
             if (sched.Time.Hour == localNow.Hour && sched.Time.Minute == localNow.Minute)
             {
-                await SendSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, tz, "daily-summary", chatId, ct);
+                await SendSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "daily-summary", chatId, ct);
             }
         }
 
@@ -94,7 +95,7 @@ public class SchedulerService : BackgroundService
         {
             if (sched.DayOfWeek == localNow.DayOfWeek && sched.Time.Hour == localNow.Hour && sched.Time.Minute == localNow.Minute)
             {
-                await SendSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, tz, "weekly-summary", chatId, ct);
+                await SendSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "weekly-summary", chatId, ct);
             }
         }
     }
@@ -124,7 +125,7 @@ public class SchedulerService : BackgroundService
         return 60;
     }
 
-    private async Task SendSummaryAsync(ContextService contextService, InstructionService instructionService, SkillInstructionService skillInstructionService, ISummarizationService summarizer, TimeZoneInfo tz, string taskName, string? chatId, CancellationToken ct)
+    private async Task SendSummaryAsync(ContextService contextService, InstructionService instructionService, SkillInstructionService skillInstructionService, ISummarizationService summarizer, IAiContextAugmenter aiContext, TimeZoneInfo tz, string taskName, string? chatId, CancellationToken ct)
     {
         var (start, end) = taskName switch
         {
@@ -139,6 +140,23 @@ public class SchedulerService : BackgroundService
         cfg.TryGetValue(ButlerSkill.Summary, out var summaryCfg);
         var allowedMask = SkillContextDefaults.ResolveSourcesMask(ButlerSkill.Summary, summaryCfg?.ContextSourcesMask ?? -1);
         items = items.Where(x => ContextSourceMask.Contains(allowedMask, x.Source)).ToList();
+
+        if (summaryCfg?.EnableAiContext == true)
+        {
+            var snippet = await aiContext.GenerateAsync(ButlerSkill.Summary, items, taskName, ct);
+            if (!string.IsNullOrWhiteSpace(snippet))
+            {
+                items.Add(new ContextItem
+                {
+                    Source = ContextSource.Personal,
+                    Title = "AI self-thought",
+                    Body = snippet.Trim(),
+                    IsTimeless = true,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    UpdatedAt = DateTimeOffset.UtcNow
+                });
+            }
+        }
 
         var sources = items.Select(x => x.Source).Distinct().ToArray();
         var instructionsBySource = await instructionService.GetBySourcesAsync(sources, ct);

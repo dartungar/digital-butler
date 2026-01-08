@@ -175,6 +175,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         var skillInstructionService = scope.ServiceProvider.GetRequiredService<SkillInstructionService>();
         var summarizer = scope.ServiceProvider.GetRequiredService<ISummarizationService>();
         var skillRouter = scope.ServiceProvider.GetRequiredService<ISkillRouter>();
+        var aiContext = scope.ServiceProvider.GetRequiredService<IAiContextAugmenter>();
         var tzService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
 
         if (text.StartsWith("/start", StringComparison.OrdinalIgnoreCase) || text.StartsWith("/help", StringComparison.OrdinalIgnoreCase))
@@ -211,7 +212,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             await SendWithKeyboardAsync(bot, chatId, "Generating daily summary...", cancellationToken: ct);
             try
             {
-                var summary = await ExecuteSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, tzService, weekly: false, taskName: "on-demand-daily", ct);
+                var summary = await ExecuteSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tzService, weekly: false, taskName: "on-demand-daily", ct);
                 if (string.IsNullOrWhiteSpace(summary)) summary = "No summary available.";
                 await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(summary), cancellationToken: ct);
             }
@@ -233,7 +234,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             await SendWithKeyboardAsync(bot, chatId, "Generating weekly summary...", cancellationToken: ct);
             try
             {
-                var summary = await ExecuteSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, tzService, weekly: true, taskName: "on-demand-weekly", ct);
+                var summary = await ExecuteSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tzService, weekly: true, taskName: "on-demand-weekly", ct);
                 if (string.IsNullOrWhiteSpace(summary)) summary = "No summary available.";
                 await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(summary), cancellationToken: ct);
             }
@@ -279,7 +280,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             await SendWithKeyboardAsync(bot, chatId, "Generating motivation...", cancellationToken: ct);
             try
             {
-                var result = await ExecuteMotivationAsync(contextService, instructionService, skillInstructionService, summarizer, tzService, ct);
+                var result = await ExecuteMotivationAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tzService, ct);
                 if (string.IsNullOrWhiteSpace(result)) result = "No motivation available.";
                 await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(result), cancellationToken: ct);
             }
@@ -300,7 +301,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             await SendWithKeyboardAsync(bot, chatId, "Generating activities...", cancellationToken: ct);
             try
             {
-                var result = await ExecuteActivitiesAsync(contextService, instructionService, skillInstructionService, summarizer, tzService, ct);
+                var result = await ExecuteActivitiesAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tzService, ct);
                 if (string.IsNullOrWhiteSpace(result)) result = "No activities available.";
                 await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(result), cancellationToken: ct);
             }
@@ -324,20 +325,20 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             {
                 case ButlerSkill.Motivation:
                     await SendWithKeyboardAsync(bot, chatId, "Generating motivation...", cancellationToken: ct);
-                    var motivation = await ExecuteMotivationAsync(contextService, instructionService, skillInstructionService, summarizer, tzService, ct);
+                    var motivation = await ExecuteMotivationAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tzService, ct);
                     if (string.IsNullOrWhiteSpace(motivation)) motivation = "No motivation available.";
                     await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(motivation), cancellationToken: ct);
                     return;
                 case ButlerSkill.Activities:
                     await SendWithKeyboardAsync(bot, chatId, "Generating activities...", cancellationToken: ct);
-                    var activities = await ExecuteActivitiesAsync(contextService, instructionService, skillInstructionService, summarizer, tzService, ct);
+                    var activities = await ExecuteActivitiesAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tzService, ct);
                     if (string.IsNullOrWhiteSpace(activities)) activities = "No activities available.";
                     await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(activities), cancellationToken: ct);
                     return;
                 case ButlerSkill.Summary:
                 default:
                     await SendWithKeyboardAsync(bot, chatId, route.PreferWeeklySummary ? "Generating weekly summary..." : "Generating daily summary...", cancellationToken: ct);
-                    var summary = await ExecuteSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, tzService, weekly: route.PreferWeeklySummary, taskName: route.PreferWeeklySummary ? "on-demand-weekly" : "on-demand-daily", ct);
+                    var summary = await ExecuteSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tzService, weekly: route.PreferWeeklySummary, taskName: route.PreferWeeklySummary ? "on-demand-weekly" : "on-demand-daily", ct);
                     if (string.IsNullOrWhiteSpace(summary)) summary = "No summary available.";
                     await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(summary), cancellationToken: ct);
                     return;
@@ -371,6 +372,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         InstructionService instructionService,
         SkillInstructionService skillInstructionService,
         ISummarizationService summarizer,
+        IAiContextAugmenter aiContext,
         TimeZoneService tzService,
         bool weekly,
         string taskName,
@@ -385,6 +387,23 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         var allowedMask = SkillContextDefaults.ResolveSourcesMask(ButlerSkill.Summary, cfg?.ContextSourcesMask ?? -1);
         items = items.Where(x => ContextSourceMask.Contains(allowedMask, x.Source)).ToList();
 
+        if (cfg?.EnableAiContext == true)
+        {
+            var snippet = await aiContext.GenerateAsync(ButlerSkill.Summary, items, taskName, ct);
+            if (!string.IsNullOrWhiteSpace(snippet))
+            {
+                items.Add(new ContextItem
+                {
+                    Source = ContextSource.Personal,
+                    Title = "AI self-thought",
+                    Body = snippet.Trim(),
+                    IsTimeless = true,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    UpdatedAt = DateTimeOffset.UtcNow
+                });
+            }
+        }
+
         var sources = items.Select(x => x.Source).Distinct().ToArray();
         var instructionsBySource = await instructionService.GetBySourcesAsync(sources, ct);
         var skillInstructions = cfg?.Content;
@@ -397,6 +416,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         InstructionService instructionService,
         SkillInstructionService skillInstructionService,
         ISummarizationService summarizer,
+        IAiContextAugmenter aiContext,
         TimeZoneService tzService,
         CancellationToken ct)
     {
@@ -406,6 +426,23 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         var cfg = await GetSkillConfigAsync(skillInstructionService, ButlerSkill.Motivation, ct);
         var allowedMask = SkillContextDefaults.ResolveSourcesMask(ButlerSkill.Motivation, cfg?.ContextSourcesMask ?? -1);
         items = items.Where(x => ContextSourceMask.Contains(allowedMask, x.Source)).ToList();
+
+        if (cfg?.EnableAiContext == true)
+        {
+            var snippet = await aiContext.GenerateAsync(ButlerSkill.Motivation, items, "motivation", ct);
+            if (!string.IsNullOrWhiteSpace(snippet))
+            {
+                items.Add(new ContextItem
+                {
+                    Source = ContextSource.Personal,
+                    Title = "AI self-thought",
+                    Body = snippet.Trim(),
+                    IsTimeless = true,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    UpdatedAt = DateTimeOffset.UtcNow
+                });
+            }
+        }
 
         // Motivation should be driven by Personal context and per-skill instructions only.
         // Do NOT apply per-source instructions (e.g. Google Calendar formatting) to this skill.
@@ -419,6 +456,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         InstructionService instructionService,
         SkillInstructionService skillInstructionService,
         ISummarizationService summarizer,
+        IAiContextAugmenter aiContext,
         TimeZoneService tzService,
         CancellationToken ct)
     {
@@ -428,6 +466,23 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         var cfg = await GetSkillConfigAsync(skillInstructionService, ButlerSkill.Activities, ct);
         var allowedMask = SkillContextDefaults.ResolveSourcesMask(ButlerSkill.Activities, cfg?.ContextSourcesMask ?? -1);
         items = items.Where(x => ContextSourceMask.Contains(allowedMask, x.Source)).ToList();
+
+        if (cfg?.EnableAiContext == true)
+        {
+            var snippet = await aiContext.GenerateAsync(ButlerSkill.Activities, items, "activities", ct);
+            if (!string.IsNullOrWhiteSpace(snippet))
+            {
+                items.Add(new ContextItem
+                {
+                    Source = ContextSource.Personal,
+                    Title = "AI self-thought",
+                    Body = snippet.Trim(),
+                    IsTimeless = true,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    UpdatedAt = DateTimeOffset.UtcNow
+                });
+            }
+        }
 
         // Activities should be driven by Personal context and per-skill instructions only.
         // Do NOT apply per-source instructions (e.g. Google Calendar formatting) to this skill.

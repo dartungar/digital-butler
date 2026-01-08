@@ -54,6 +54,7 @@ public sealed class ButlerSchemaInitializer
                 Skill INTEGER NOT NULL,
                 Content TEXT NOT NULL,
                 ContextSourcesMask INTEGER NOT NULL DEFAULT -1,
+                EnableAiContext INTEGER NOT NULL DEFAULT 0,
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL
             );
@@ -95,6 +96,15 @@ public sealed class ButlerSchemaInitializer
         try
         {
             await conn.ExecuteAsync("ALTER TABLE SkillInstructions ADD COLUMN ContextSourcesMask INTEGER NOT NULL DEFAULT -1;");
+        }
+        catch
+        {
+            // Intentionally ignored
+        }
+
+        try
+        {
+            await conn.ExecuteAsync("ALTER TABLE SkillInstructions ADD COLUMN EnableAiContext INTEGER NOT NULL DEFAULT 0;");
         }
         catch
         {

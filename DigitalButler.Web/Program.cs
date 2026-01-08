@@ -156,6 +156,7 @@ builder.Services.Configure<GoogleCalendarOptions>(builder.Configuration.GetSecti
 builder.Services.Configure<GmailOptions>(builder.Configuration.GetSection("Gmail"));
 builder.Services.AddHttpClient<ISummarizationService, OpenAiSummarizationService>();
 builder.Services.AddHttpClient<ISkillRouter, OpenAiSkillRouter>();
+builder.Services.AddHttpClient<IAiContextAugmenter, OpenAiContextAugmenter>();
 builder.Services.AddScoped<AiSettingsResolver>();
 builder.Services.AddHostedService<SchedulerService>();
 
