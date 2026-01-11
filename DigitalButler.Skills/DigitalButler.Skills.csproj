@@ -18,8 +18,4 @@
         <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.0-preview.3.25171.5" />
     </ItemGroup>
 
-    <ItemGroup>
-        <Compile Remove="SubjectTranslation.cs" />
-    </ItemGroup>
-
 </Project>

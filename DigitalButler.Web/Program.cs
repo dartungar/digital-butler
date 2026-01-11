@@ -162,6 +162,7 @@ builder.Services.AddHttpClient<ISkillRouter, OpenAiSkillRouter>();
 builder.Services.AddHttpClient<IAiContextAugmenter, OpenAiContextAugmenter>();
 builder.Services.AddHttpClient<ISubjectTranslator, OpenAiSubjectTranslator>();
 builder.Services.AddHttpClient<IDrawingReferenceService, UnsplashDrawingReferenceService>();
+builder.Services.AddSingleton<IRandomDrawingTopicService, RandomDrawingTopicService>();
 builder.Services.AddScoped<AiSettingsResolver>();
 builder.Services.AddHostedService<SchedulerService>();
 

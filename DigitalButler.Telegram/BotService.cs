@@ -28,6 +28,10 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
     // Key: chat id. Value: awaiting subject.
     private readonly ConcurrentDictionary<long, bool> _awaitingDrawingSubject = new();
 
+    // Pending random topic confirmations.
+    // Key: chat id. Value: suggested topic.
+    private readonly ConcurrentDictionary<long, string> _pendingTopicConfirmation = new();
+
     public BotService(ILogger<BotService> logger, IServiceProvider services, IConfiguration config)
     {
         _logger = logger;
@@ -159,6 +163,12 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
 
     private async Task HandleUpdateAsync(ITelegramBotClient bot, Update update, CancellationToken ct)
     {
+        if (update.Type == UpdateType.CallbackQuery && update.CallbackQuery is not null)
+        {
+            await HandleCallbackQueryAsync(bot, update.CallbackQuery, ct);
+            return;
+        }
+
         if (update.Type != UpdateType.Message || update.Message?.Text is null)
             return;
 
@@ -223,8 +233,16 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             var subject = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Skip(1).FirstOrDefault();
             if (string.IsNullOrWhiteSpace(subject))
             {
-                _awaitingDrawingSubject[chatId] = true;
-                await SendWithKeyboardAsync(bot, chatId, "What do you want to draw? (e.g. \"hands\", \"a bicycle\", \"a cat\")", cancellationToken: ct);
+                // No subject provided - suggest a random topic
+                var topicService = scope.ServiceProvider.GetRequiredService<IRandomDrawingTopicService>();
+                var randomTopic = topicService.GetRandomTopic();
+                _pendingTopicConfirmation[chatId] = randomTopic;
+
+                await bot.SendTextMessageAsync(
+                    chatId,
+                    $"How about drawing: \"{randomTopic}\"?",
+                    replyMarkup: BuildDrawingTopicConfirmationKeyboard(),
+                    cancellationToken: ct);
                 return;
             }
 
@@ -388,8 +406,16 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
                 case ButlerSkill.DrawingReference:
                     if (!TryExtractDrawingSubject(text, out var extracted))
                     {
-                        _awaitingDrawingSubject[chatId] = true;
-                        await SendWithKeyboardAsync(bot, chatId, "What do you want to draw?", cancellationToken: ct);
+                        // No subject extracted - suggest a random topic
+                        var topicService = scope.ServiceProvider.GetRequiredService<IRandomDrawingTopicService>();
+                        var randomTopic = topicService.GetRandomTopic();
+                        _pendingTopicConfirmation[chatId] = randomTopic;
+
+                        await bot.SendTextMessageAsync(
+                            chatId,
+                            $"How about drawing: \"{randomTopic}\"?",
+                            replyMarkup: BuildDrawingTopicConfirmationKeyboard(),
+                            cancellationToken: ct);
                         return;
                     }
 
@@ -416,6 +442,111 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         }
 
         await SendWithKeyboardAsync(bot, chatId, "Unknown command. Use /daily, /weekly, /motivation, /activities, /add <text>", cancellationToken: ct);
+    }
+
+    private async Task HandleCallbackQueryAsync(ITelegramBotClient bot, CallbackQuery callbackQuery, CancellationToken ct)
+    {
+        var chatId = callbackQuery.Message?.Chat.Id;
+        var userId = callbackQuery.From.Id;
+        var data = callbackQuery.Data;
+
+        if (chatId is null || string.IsNullOrWhiteSpace(data))
+        {
+            await bot.AnswerCallbackQueryAsync(callbackQuery.Id, cancellationToken: ct);
+            return;
+        }
+
+        // Authorization check
+        if (userId != _allowedUserId)
+        {
+            _logger.LogWarning("Unauthorized callback query from user {UserId}", userId);
+            await bot.AnswerCallbackQueryAsync(callbackQuery.Id, "Unauthorized.", cancellationToken: ct);
+            return;
+        }
+
+        // Handle drawing topic confirmation callbacks
+        if (data.StartsWith("drawref:", StringComparison.Ordinal))
+        {
+            var action = data["drawref:".Length..];
+
+            if (action == "confirm")
+            {
+                if (_pendingTopicConfirmation.TryRemove(chatId.Value, out var topic))
+                {
+                    await bot.AnswerCallbackQueryAsync(callbackQuery.Id, cancellationToken: ct);
+
+                    // Edit the original message to remove the inline keyboard
+                    if (callbackQuery.Message is not null)
+                    {
+                        await bot.EditMessageTextAsync(
+                            chatId.Value,
+                            callbackQuery.Message.MessageId,
+                            $"Drawing topic: {topic}",
+                            replyMarkup: null,
+                            cancellationToken: ct);
+                    }
+
+                    await SendWithKeyboardAsync(bot, chatId.Value, "Finding a drawing reference...", cancellationToken: ct);
+
+                    using var scope = _services.CreateScope();
+                    var drawingRef = scope.ServiceProvider.GetRequiredService<IDrawingReferenceService>();
+                    var subjectTranslator = scope.ServiceProvider.GetRequiredService<ISubjectTranslator>();
+
+                    try
+                    {
+                        var reply = await ExecuteDrawingReferenceAsync(drawingRef, subjectTranslator, topic, ct);
+                        await SendWithKeyboardAsync(bot, chatId.Value, TruncateForTelegram(reply), cancellationToken: ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to generate drawing reference after confirmation");
+                        await SendWithKeyboardAsync(bot, chatId.Value, TruncateForTelegram(BuildUserFacingError(ex)), cancellationToken: ct);
+                    }
+                }
+                else
+                {
+                    await bot.AnswerCallbackQueryAsync(callbackQuery.Id, "Session expired. Please try again.", cancellationToken: ct);
+                }
+            }
+            else if (action == "another")
+            {
+                await bot.AnswerCallbackQueryAsync(callbackQuery.Id, cancellationToken: ct);
+
+                using var scope = _services.CreateScope();
+                var topicService = scope.ServiceProvider.GetRequiredService<IRandomDrawingTopicService>();
+
+                var newTopic = topicService.GetRandomTopic();
+                _pendingTopicConfirmation[chatId.Value] = newTopic;
+
+                // Edit the original message with the new topic suggestion
+                if (callbackQuery.Message is not null)
+                {
+                    await bot.EditMessageTextAsync(
+                        chatId.Value,
+                        callbackQuery.Message.MessageId,
+                        $"How about drawing: \"{newTopic}\"?",
+                        replyMarkup: BuildDrawingTopicConfirmationKeyboard(),
+                        cancellationToken: ct);
+                }
+            }
+
+            return;
+        }
+
+        // Unknown callback
+        await bot.AnswerCallbackQueryAsync(callbackQuery.Id, cancellationToken: ct);
+    }
+
+    private static InlineKeyboardMarkup BuildDrawingTopicConfirmationKeyboard()
+    {
+        return new InlineKeyboardMarkup(new[]
+        {
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("Yes, let's go!", "drawref:confirm"),
+                InlineKeyboardButton.WithCallbackData("Suggest another", "drawref:another")
+            }
+        });
     }
 
     private static ReplyKeyboardMarkup BuildKeyboard()
@@ -634,6 +765,19 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         }
 
         if (string.IsNullOrWhiteSpace(cleaned) || cleaned.StartsWith("practice", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // Reject vague/non-subject words that don't represent a drawable subject.
+        var vague = new[]
+        {
+            "something", "anything", "stuff", "things", "thing",
+            "time", "now", "today", "session", "practice",
+            "please", "thanks", "help", "me", "it", "this", "that",
+            "idk", "dunno", "whatever", "random", "surprise", "shit", "что-нибудь", "что-то"
+        };
+        if (vague.Any(v => cleaned.Equals(v, StringComparison.OrdinalIgnoreCase)))
         {
             return false;
         }

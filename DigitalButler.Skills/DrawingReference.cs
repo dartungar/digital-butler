@@ -12,6 +12,39 @@ public sealed class UnsplashOptions
 
 public readonly record struct DrawingReferenceResult(string ImageUrl, string PhotoPageUrl, string PhotographerName, string PhotographerProfileUrl);
 
+public interface IRandomDrawingTopicService
+{
+    string GetRandomTopic();
+}
+
+public sealed class RandomDrawingTopicService : IRandomDrawingTopicService
+{
+    private static readonly string[] Topics =
+    [
+        // People & anatomy
+        "hands", "portrait", "eyes", "lips", "nose", "ears", "feet", "figure drawing", "gesture", "face from side",
+        // Animals
+        "cat", "dog", "bird", "horse", "fish", "butterfly", "owl", "wolf", "rabbit", "elephant",
+        // Objects
+        "chair", "cup", "shoes", "book", "lamp", "bicycle", "car", "guitar", "clock", "vase",
+        // Nature
+        "tree", "flower", "clouds", "mountains", "waterfall", "leaves", "sunset", "rocks", "ocean waves", "forest",
+        // Architecture
+        "building", "window", "door", "bridge", "stairs", "interior", "cathedral", "cityscape", "street", "ruins",
+        // Food
+        "fruit", "vegetables", "bread", "coffee", "cake", "eggs", "cheese", "wine bottle", "kitchen utensils", "pie",
+        // Fabric & texture
+        "drapery", "fabric folds", "leather texture", "wood grain", "metal surface", "glass", "fur texture", "feathers", "rope", "paper",
+        // Still life
+        "still life with fruit", "vintage objects", "candles", "bottles and jars", "flowers in vase", "kitchen still life", "art supplies", "antique items", "musical instruments", "seashells"
+    ];
+
+    public string GetRandomTopic()
+    {
+        return Topics[Random.Shared.Next(Topics.Length)];
+    }
+}
+
 public interface IDrawingReferenceService
 {
     Task<DrawingReferenceResult?> GetReferenceAsync(string subject, CancellationToken ct = default);
