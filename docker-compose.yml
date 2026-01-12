@@ -18,6 +18,8 @@ services:
       - GCAL_ICAL_URLS=${GCAL_ICAL_URLS}
       - GCAL_FEED1_NAME=${GCAL_FEED1_NAME}
       - GCAL_FEED1_URL=${GCAL_FEED1_URL}
+      - GOOGLE_SERVICE_ACCOUNT_JSON=${GOOGLE_SERVICE_ACCOUNT_JSON}
+      - GOOGLE_CALENDAR_ID=${GOOGLE_CALENDAR_ID}
       # Optional additional feeds (supported as GCAL_FEED{N}_NAME/URL)
       - GCAL_FEED2_NAME=${GCAL_FEED2_NAME}
       - GCAL_FEED2_URL=${GCAL_FEED2_URL}
@@ -35,6 +37,9 @@ services:
     volumes:
       - butler-data:/data
     restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
 volumes:
   butler-data:
 

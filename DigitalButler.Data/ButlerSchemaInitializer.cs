@@ -88,6 +88,17 @@ public sealed class ButlerSchemaInitializer
                 Value TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS GoogleOAuthTokens (
+                Id TEXT NOT NULL PRIMARY KEY,
+                UserId TEXT NOT NULL,
+                AccessToken TEXT NOT NULL,
+                RefreshToken TEXT NULL,
+                ExpiresAt TEXT NOT NULL,
+                Scope TEXT NOT NULL,
+                CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL
+            );
             """
         );
 
@@ -122,6 +133,7 @@ public sealed class ButlerSchemaInitializer
             CREATE INDEX IF NOT EXISTS IX_SummarySchedules_IsWeekly_DayOfWeek ON SummarySchedules (IsWeekly, DayOfWeek);
             CREATE UNIQUE INDEX IF NOT EXISTS IX_GoogleCalendarFeeds_Url ON GoogleCalendarFeeds (Url);
             CREATE UNIQUE INDEX IF NOT EXISTS IX_SkillInstructions_Skill ON SkillInstructions (Skill);
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_GoogleOAuthTokens_UserId ON GoogleOAuthTokens (UserId);
             """
         );
     }

@@ -54,7 +54,8 @@ public enum ButlerSkill
     Summary = 0,
     Motivation = 1,
     Activities = 2,
-    DrawingReference = 3
+    DrawingReference = 3,
+    CalendarEvent = 4
 }
 
 public class SkillInstruction
@@ -97,6 +98,7 @@ public static class SkillContextDefaults
             ButlerSkill.Summary => ContextSourceMask.All(),
             ButlerSkill.Motivation => ContextSourceMask.For(ContextSource.Personal),
             ButlerSkill.Activities => ContextSourceMask.For(ContextSource.Personal),
+            ButlerSkill.CalendarEvent => 0, // No context sources needed for event creation
             _ => ContextSourceMask.All()
         };
 
@@ -151,4 +153,16 @@ public interface IScheduleService
     Task ScheduleUpdateAsync(ContextSource source, string cronOrInterval, CancellationToken ct = default);
     Task ScheduleDailySummaryAsync(TimeOnly time, CancellationToken ct = default);
     Task ScheduleWeeklySummaryAsync(DayOfWeek day, TimeOnly time, CancellationToken ct = default);
+}
+
+public class GoogleOAuthToken
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string UserId { get; set; } = string.Empty;
+    public string AccessToken { get; set; } = string.Empty;
+    public string? RefreshToken { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public string Scope { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

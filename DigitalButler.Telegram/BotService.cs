@@ -32,6 +32,12 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
     // Key: chat id. Value: suggested topic.
     private readonly ConcurrentDictionary<long, string> _pendingTopicConfirmation = new();
 
+    // Pending calendar event confirmations.
+    // Key: chat id. Value: pending event details.
+    private readonly ConcurrentDictionary<long, PendingCalendarEvent> _pendingEventConfirmation = new();
+
+    private readonly record struct PendingCalendarEvent(ParsedCalendarEvent Parsed, DateTimeOffset CreatedAt);
+
     public BotService(ILogger<BotService> logger, IServiceProvider services, IConfiguration config)
     {
         _logger = logger;
@@ -222,6 +228,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
                 "/motivation - motivational message\n" +
                 "/activities - activity suggestions\n" +
                 "/drawref <subject> - drawing reference image\n" +
+                "/addevent <text> - add a calendar event\n" +
                 "/add <text> - add personal context\n" +
                 "/sync - run all ingests now",
                 cancellationToken: ct);
@@ -257,6 +264,23 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
                 _logger.LogWarning(ex, "Failed to generate /drawref");
                 await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), cancellationToken: ct);
             }
+            return;
+        }
+
+        if (text.StartsWith("/addevent", StringComparison.OrdinalIgnoreCase) ||
+            text.StartsWith("/newevent", StringComparison.OrdinalIgnoreCase) ||
+            text.StartsWith("/event ", StringComparison.OrdinalIgnoreCase))
+        {
+            var eventText = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Skip(1).FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(eventText))
+            {
+                await SendWithKeyboardAsync(bot, chatId,
+                    "Usage: /addevent Meeting with John tomorrow at 3pm",
+                    cancellationToken: ct);
+                return;
+            }
+
+            await HandleAddEventAsync(bot, chatId, eventText, scope, ct);
             return;
         }
 
@@ -431,6 +455,11 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
                         await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), cancellationToken: ct);
                     }
                     return;
+                case ButlerSkill.CalendarEvent:
+                    // Extract event text - try to get the relevant part after common prefixes
+                    var eventText = TryExtractEventText(text) ?? text;
+                    await HandleAddEventAsync(bot, chatId, eventText, scope, ct);
+                    return;
                 case ButlerSkill.Summary:
                 default:
                     await SendWithKeyboardAsync(bot, chatId, route.PreferWeeklySummary ? "Generating weekly summary..." : "Generating daily summary...", cancellationToken: ct);
@@ -441,7 +470,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             }
         }
 
-        await SendWithKeyboardAsync(bot, chatId, "Unknown command. Use /daily, /weekly, /motivation, /activities, /add <text>", cancellationToken: ct);
+        await SendWithKeyboardAsync(bot, chatId, "Unknown command. Use /daily, /weekly, /motivation, /activities, /addevent, /add <text>", cancellationToken: ct);
     }
 
     private async Task HandleCallbackQueryAsync(ITelegramBotClient bot, CallbackQuery callbackQuery, CancellationToken ct)
@@ -526,6 +555,70 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
                         callbackQuery.Message.MessageId,
                         $"How about drawing: \"{newTopic}\"?",
                         replyMarkup: BuildDrawingTopicConfirmationKeyboard(),
+                        cancellationToken: ct);
+                }
+            }
+
+            return;
+        }
+
+        // Handle calendar event confirmation callbacks
+        if (data.StartsWith("calevent:", StringComparison.Ordinal))
+        {
+            var action = data["calevent:".Length..];
+
+            if (action == "confirm")
+            {
+                if (_pendingEventConfirmation.TryRemove(chatId.Value, out var pending))
+                {
+                    await bot.AnswerCallbackQueryAsync(callbackQuery.Id, cancellationToken: ct);
+
+                    // Edit the original message to show we're creating the event
+                    if (callbackQuery.Message is not null)
+                    {
+                        await bot.EditMessageTextAsync(
+                            chatId.Value,
+                            callbackQuery.Message.MessageId,
+                            $"Creating event: {pending.Parsed.Title}...",
+                            replyMarkup: null,
+                            cancellationToken: ct);
+                    }
+
+                    using var scope = _services.CreateScope();
+                    var calendarService = scope.ServiceProvider.GetRequiredService<IGoogleCalendarEventService>();
+
+                    var result = await calendarService.CreateEventAsync(pending.Parsed, ct);
+
+                    if (result.Success)
+                    {
+                        await SendWithKeyboardAsync(bot, chatId.Value,
+                            $"Event created: {pending.Parsed.Title}\n{result.HtmlLink}",
+                            cancellationToken: ct);
+                    }
+                    else
+                    {
+                        await SendWithKeyboardAsync(bot, chatId.Value,
+                            $"Failed to create event: {result.Error}",
+                            cancellationToken: ct);
+                    }
+                }
+                else
+                {
+                    await bot.AnswerCallbackQueryAsync(callbackQuery.Id, "Session expired. Please try again.", cancellationToken: ct);
+                }
+            }
+            else if (action == "reject")
+            {
+                _pendingEventConfirmation.TryRemove(chatId.Value, out _);
+                await bot.AnswerCallbackQueryAsync(callbackQuery.Id, cancellationToken: ct);
+
+                if (callbackQuery.Message is not null)
+                {
+                    await bot.EditMessageTextAsync(
+                        chatId.Value,
+                        callbackQuery.Message.MessageId,
+                        "Event creation cancelled.",
+                        replyMarkup: null,
                         cancellationToken: ct);
                 }
             }
@@ -722,6 +815,33 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         return sb.ToString();
     }
 
+    private static string? TryExtractEventText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var lowered = text.Trim();
+
+        // Extract the event description from common patterns
+        static string? After(string input, string needle)
+        {
+            var idx = input.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return null;
+            return input[(idx + needle.Length)..].Trim();
+        }
+
+        // Try to extract from common patterns
+        var tail = After(lowered, "create event ")
+                   ?? After(lowered, "schedule ")
+                   ?? After(lowered, "add event ")
+                   ?? After(lowered, "new event ")
+                   ?? After(lowered, "add ");
+
+        return string.IsNullOrWhiteSpace(tail) ? text : tail;
+    }
+
     private static bool TryExtractDrawingSubject(string text, out string? subject)
     {
         subject = null;
@@ -877,5 +997,100 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
     {
         _logger.LogError(exception, "Telegram bot error");
         return Task.CompletedTask;
+    }
+
+    private async Task HandleAddEventAsync(ITelegramBotClient bot, long chatId, string eventText, IServiceScope scope, CancellationToken ct)
+    {
+        var calendarService = scope.ServiceProvider.GetRequiredService<IGoogleCalendarEventService>();
+
+        // Check if service is configured
+        if (!calendarService.IsConfigured)
+        {
+            await SendWithKeyboardAsync(bot, chatId,
+                "Google Calendar is not configured. Set GOOGLE_SERVICE_ACCOUNT_KEY_PATH or GOOGLE_SERVICE_ACCOUNT_JSON, and GOOGLE_CALENDAR_ID.",
+                cancellationToken: ct);
+            return;
+        }
+
+        await SendWithKeyboardAsync(bot, chatId, "Parsing your event...", cancellationToken: ct);
+
+        // Clean up expired pending events (older than 5 minutes)
+        var expiredChats = _pendingEventConfirmation
+            .Where(kvp => (DateTimeOffset.UtcNow - kvp.Value.CreatedAt).TotalMinutes > 5)
+            .Select(kvp => kvp.Key)
+            .ToList();
+        foreach (var expiredChat in expiredChats)
+        {
+            _pendingEventConfirmation.TryRemove(expiredChat, out _);
+        }
+
+        var parser = scope.ServiceProvider.GetRequiredService<ICalendarEventParser>();
+        var tzService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
+        var tz = await tzService.GetTimeZoneInfoAsync(ct);
+
+        try
+        {
+            var parsed = await parser.ParseAsync(eventText, tz, ct);
+            if (parsed is null)
+            {
+                await SendWithKeyboardAsync(bot, chatId,
+                    "I couldn't understand that event. Try something like:\n\"Meeting with John tomorrow at 3pm for 1 hour\"",
+                    cancellationToken: ct);
+                return;
+            }
+
+            // Store pending event and show confirmation
+            _pendingEventConfirmation[chatId] = new PendingCalendarEvent(parsed, DateTimeOffset.UtcNow);
+
+            var preview = BuildEventPreview(parsed, tz);
+            await bot.SendTextMessageAsync(chatId, preview,
+                replyMarkup: BuildEventConfirmationKeyboard(),
+                cancellationToken: ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse calendar event");
+            await SendWithKeyboardAsync(bot, chatId,
+                TruncateForTelegram(BuildUserFacingError(ex)),
+                cancellationToken: ct);
+        }
+    }
+
+    private static string BuildEventPreview(ParsedCalendarEvent ev, TimeZoneInfo tz)
+    {
+        var localStart = TimeZoneInfo.ConvertTime(ev.StartTime, tz);
+        var localEnd = TimeZoneInfo.ConvertTime(ev.StartTime + ev.Duration, tz);
+
+        return $"Create this event?\n\n" +
+               $"Title: {ev.Title}\n" +
+               $"When: {localStart:ddd MMM d, h:mm tt} - {localEnd:h:mm tt}\n" +
+               $"Duration: {FormatDuration(ev.Duration)}";
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        if (duration.TotalMinutes < 60)
+        {
+            return $"{(int)duration.TotalMinutes} min";
+        }
+        if (duration.TotalHours < 24)
+        {
+            var hours = (int)duration.TotalHours;
+            var mins = duration.Minutes;
+            return mins > 0 ? $"{hours}h {mins}min" : $"{hours}h";
+        }
+        return $"{duration.TotalHours:F1} hours";
+    }
+
+    private static InlineKeyboardMarkup BuildEventConfirmationKeyboard()
+    {
+        return new InlineKeyboardMarkup(new[]
+        {
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("Create Event", "calevent:confirm"),
+                InlineKeyboardButton.WithCallbackData("Cancel", "calevent:reject")
+            }
+        });
     }
 }

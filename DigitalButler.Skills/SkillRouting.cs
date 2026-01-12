@@ -58,6 +58,7 @@ Pick exactly one skill for the user's message:
 - motivation (motivational message based on personal context)
 - activities (suggest what to do based on energy/mood)
 - drawing_reference (find a drawing reference image)
+- calendar_event (create a new calendar event)
 
 Return ONLY one of these tokens:
 summary_daily
@@ -65,6 +66,7 @@ summary_weekly
 motivation
 activities
 drawing_reference
+calendar_event
 
 Output rules:
 - Output the token only (no other words like "Answer:" and no punctuation).
@@ -92,6 +94,15 @@ Answer: drawing_reference
 
 User: I want to practice drawing
 Answer: drawing_reference
+
+User: schedule a meeting with John tomorrow at 3pm
+Answer: calendar_event
+
+User: add dentist appointment on Friday at 10am
+Answer: calendar_event
+
+User: create event for lunch with Sarah next Monday
+Answer: calendar_event
 """;
 
         var input = "User message:\n" + text.Trim();
@@ -140,11 +151,13 @@ Answer: drawing_reference
         else if (token.Contains("motivation")) token = "motivation";
         else if (token.Contains("activities")) token = "activities";
         else if (token.Contains("drawing_reference")) token = "drawing_reference";
+        else if (token.Contains("calendar_event")) token = "calendar_event";
 
         // Be tolerant of minor deviations (we still instruct the model not to abbreviate).
         if (token is "mot" or "motiv" or "motivational") token = "motivation";
         if (token is "act" or "activity") token = "activities";
         if (token is "draw" or "drawing" or "reference" or "drawingreference" or "drawing_ref") token = "drawing_reference";
+        if (token is "calendar" or "event" or "schedule" or "add_event" or "newevent" or "addevent") token = "calendar_event";
         if (token is "summary") token = "summary_daily";
 
         switch (token)
@@ -157,6 +170,9 @@ Answer: drawing_reference
                 return true;
             case "drawing_reference":
                 route = new SkillRoute(ButlerSkill.DrawingReference, PreferWeeklySummary: false);
+                return true;
+            case "calendar_event":
+                route = new SkillRoute(ButlerSkill.CalendarEvent, PreferWeeklySummary: false);
                 return true;
             case "summary_weekly":
                 route = new SkillRoute(ButlerSkill.Summary, PreferWeeklySummary: true);

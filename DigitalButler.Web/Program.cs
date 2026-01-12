@@ -69,6 +69,10 @@ MapEnv(envOverrides, "GCAL_ICAL_URLS", "GoogleCalendar:IcalUrls");
 MapEnv(envOverrides, "GCAL_FEED1_NAME", "GoogleCalendar:IcalFeeds:0:Name");
 MapEnv(envOverrides, "GCAL_FEED1_URL", "GoogleCalendar:IcalFeeds:0:Url");
 
+MapEnv(envOverrides, "GOOGLE_SERVICE_ACCOUNT_KEY_PATH", "GoogleCalendarOAuth:ServiceAccountKeyPath");
+MapEnv(envOverrides, "GOOGLE_SERVICE_ACCOUNT_JSON", "GoogleCalendarOAuth:ServiceAccountJson");
+MapEnv(envOverrides, "GOOGLE_CALENDAR_ID", "GoogleCalendarOAuth:CalendarId");
+
 // Support GCAL_FEED{N}_NAME / GCAL_FEED{N}_URL (N = 1..n)
 // Example: GCAL_FEED2_NAME -> GoogleCalendar:IcalFeeds:1:Name
 //          GCAL_FEED2_URL  -> GoogleCalendar:IcalFeeds:1:Url
@@ -131,6 +135,7 @@ builder.Services.AddScoped<SkillInstructionRepository>();
 builder.Services.AddScoped<AiTaskSettingRepository>();
 builder.Services.AddScoped<ScheduleRepository>();
 builder.Services.AddScoped<GoogleCalendarFeedRepository>();
+builder.Services.AddScoped<GoogleOAuthTokenRepository>();
 builder.Services.AddScoped<AppSettingsRepository>();
 
 builder.Services.AddRazorComponents()
@@ -157,12 +162,15 @@ builder.Services.Configure<ButlerOptions>(builder.Configuration.GetSection("Butl
 builder.Services.Configure<GoogleCalendarOptions>(builder.Configuration.GetSection("GoogleCalendar"));
 builder.Services.Configure<GmailOptions>(builder.Configuration.GetSection("Gmail"));
 builder.Services.Configure<UnsplashOptions>(builder.Configuration.GetSection("Unsplash"));
+builder.Services.Configure<GoogleCalendarOAuthOptions>(builder.Configuration.GetSection("GoogleCalendarOAuth"));
 builder.Services.AddHttpClient<ISummarizationService, OpenAiSummarizationService>();
 builder.Services.AddHttpClient<ISkillRouter, OpenAiSkillRouter>();
 builder.Services.AddHttpClient<IAiContextAugmenter, OpenAiContextAugmenter>();
 builder.Services.AddHttpClient<ISubjectTranslator, OpenAiSubjectTranslator>();
 builder.Services.AddHttpClient<IDrawingReferenceService, UnsplashDrawingReferenceService>();
 builder.Services.AddSingleton<IRandomDrawingTopicService, RandomDrawingTopicService>();
+builder.Services.AddSingleton<IGoogleCalendarEventService, GoogleCalendarEventService>();
+builder.Services.AddHttpClient<ICalendarEventParser, OpenAiCalendarEventParser>();
 builder.Services.AddScoped<AiSettingsResolver>();
 builder.Services.AddHostedService<SchedulerService>();
 
