@@ -215,11 +215,31 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             return;
         }
 
-        if (update.Type != UpdateType.Message || update.Message?.Text is null)
+        if (update.Type != UpdateType.Message || update.Message is null)
             return;
 
         var chatId = update.Message.Chat.Id;
         var userId = update.Message.From?.Id;
+
+        // Handle voice messages
+        if (update.Message.Voice is not null)
+        {
+            await HandleVoiceMessageAsync(bot, chatId, userId, update.Message.Voice, update.Message.Caption, ct);
+            return;
+        }
+
+        // Handle photo messages
+        if (update.Message.Photo is not null && update.Message.Photo.Length > 0)
+        {
+            var largestPhoto = update.Message.Photo.OrderByDescending(p => p.FileSize).First();
+            await HandlePhotoMessageAsync(bot, chatId, userId, largestPhoto, update.Message.Caption, ct);
+            return;
+        }
+
+        // Handle text messages
+        if (update.Message.Text is null)
+            return;
+
         var text = update.Message.Text.Trim();
 
         // Authorization check: only allow configured user
@@ -511,6 +531,178 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         }
 
         await SendWithKeyboardAsync(bot, chatId, "Unknown command. Use /daily, /weekly, /motivation, /activities, /addevent, /add <text>", cancellationToken: ct);
+    }
+
+    private async Task HandleVoiceMessageAsync(ITelegramBotClient bot, long chatId, long? userId, Voice voice, string? caption, CancellationToken ct)
+    {
+        // Authorization check
+        if (userId != _allowedUserId)
+        {
+            _logger.LogWarning("Unauthorized voice message from user {UserId}", userId);
+            await SendWithKeyboardAsync(bot, chatId, "Unauthorized.", cancellationToken: ct);
+            return;
+        }
+
+        await SendWithKeyboardAsync(bot, chatId, "Transcribing voice message...", cancellationToken: ct);
+
+        try
+        {
+            using var scope = _services.CreateScope();
+            var mediaDownloadService = scope.ServiceProvider.GetRequiredService<IMediaDownloadService>();
+            var transcriptionService = scope.ServiceProvider.GetRequiredService<IAudioTranscriptionService>();
+            var contextService = scope.ServiceProvider.GetRequiredService<ContextService>();
+            var skillRouter = scope.ServiceProvider.GetRequiredService<ISkillRouter>();
+
+            // Download audio file
+            var audioData = await mediaDownloadService.DownloadFileAsync(bot, voice.FileId, ct);
+
+            // Transcribe
+            var result = await transcriptionService.TranscribeAsync(audioData, $"voice_{voice.FileId}.ogg", ct);
+            var transcribedText = result.Text;
+
+            if (string.IsNullOrWhiteSpace(transcribedText))
+            {
+                await SendWithKeyboardAsync(bot, chatId, "Could not transcribe the voice message.", cancellationToken: ct);
+                return;
+            }
+
+            // Try to route through skill router first
+            var route = await skillRouter.RouteAsync(transcribedText, ct);
+
+            var instructionService = scope.ServiceProvider.GetRequiredService<InstructionService>();
+            var skillInstructionService = scope.ServiceProvider.GetRequiredService<SkillInstructionService>();
+            var summarizer = scope.ServiceProvider.GetRequiredService<ISummarizationService>();
+            var aiContext = scope.ServiceProvider.GetRequiredService<IAiContextAugmenter>();
+            var tzService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
+
+            switch (route.Skill)
+            {
+                case ButlerSkill.CalendarEvent:
+                    await SendWithKeyboardAsync(bot, chatId, $"Transcribed: \"{transcribedText}\"\n\nCreating event...", cancellationToken: ct);
+                    var eventText = TryExtractEventText(transcribedText) ?? transcribedText;
+                    await HandleAddEventAsync(bot, chatId, eventText, scope, ct);
+                    break;
+                case ButlerSkill.Motivation:
+                    await SendWithKeyboardAsync(bot, chatId, $"Transcribed: \"{transcribedText}\"\n\nGenerating motivation...", cancellationToken: ct);
+                    var motivation = await ExecuteMotivationAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tzService, ct);
+                    await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(motivation ?? "No motivation available."), cancellationToken: ct);
+                    break;
+                case ButlerSkill.Activities:
+                    await SendWithKeyboardAsync(bot, chatId, $"Transcribed: \"{transcribedText}\"\n\nGenerating activities...", cancellationToken: ct);
+                    var activities = await ExecuteActivitiesAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tzService, ct);
+                    await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(activities ?? "No activities available."), cancellationToken: ct);
+                    break;
+                case ButlerSkill.Summary:
+                    await SendWithKeyboardAsync(bot, chatId, $"Transcribed: \"{transcribedText}\"\n\nGenerating summary...", cancellationToken: ct);
+                    var summary = await ExecuteSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tzService, weekly: route.PreferWeeklySummary, taskName: route.PreferWeeklySummary ? "on-demand-weekly" : "on-demand-daily", ct);
+                    await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(summary ?? "No summary available."), cancellationToken: ct);
+                    break;
+                case ButlerSkill.DrawingReference:
+                default:
+                    // Fallback: save to context
+                    await contextService.AddPersonalAsync(
+                        body: transcribedText,
+                        title: "Voice note",
+                        mediaMetadata: $"Transcription confidence: {result.Confidence:F2}",
+                        mediaType: "voice",
+                        ct: ct);
+                    await SendWithKeyboardAsync(bot, chatId, $"Transcribed and saved:\n\n\"{transcribedText}\"", cancellationToken: ct);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to process voice message");
+            await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), cancellationToken: ct);
+        }
+    }
+
+    private async Task HandlePhotoMessageAsync(ITelegramBotClient bot, long chatId, long? userId, PhotoSize photo, string? caption, CancellationToken ct)
+    {
+        // Authorization check
+        if (userId != _allowedUserId)
+        {
+            _logger.LogWarning("Unauthorized photo message from user {UserId}", userId);
+            await SendWithKeyboardAsync(bot, chatId, "Unauthorized.", cancellationToken: ct);
+            return;
+        }
+
+        await SendWithKeyboardAsync(bot, chatId, "Analyzing image...", cancellationToken: ct);
+
+        try
+        {
+            using var scope = _services.CreateScope();
+            var mediaDownloadService = scope.ServiceProvider.GetRequiredService<IMediaDownloadService>();
+            var imageAnalysisService = scope.ServiceProvider.GetRequiredService<IImageAnalysisService>();
+            var contextService = scope.ServiceProvider.GetRequiredService<ContextService>();
+            var skillRouter = scope.ServiceProvider.GetRequiredService<ISkillRouter>();
+
+            // Download image
+            var imageData = await mediaDownloadService.DownloadFileAsync(bot, photo.FileId, ct);
+
+            // Analyze image
+            var result = await imageAnalysisService.AnalyzeAsync(imageData, caption, ct);
+            var description = result.Description;
+
+            if (string.IsNullOrWhiteSpace(description))
+            {
+                await SendWithKeyboardAsync(bot, chatId, "Could not analyze the image.", cancellationToken: ct);
+                return;
+            }
+
+            // Try to route through skill router - use caption for routing if available (it contains user intent)
+            var textForRouting = string.IsNullOrWhiteSpace(caption) ? description : caption;
+            var route = await skillRouter.RouteAsync(textForRouting, ct);
+
+            var instructionService = scope.ServiceProvider.GetRequiredService<InstructionService>();
+            var skillInstructionService = scope.ServiceProvider.GetRequiredService<SkillInstructionService>();
+            var summarizer = scope.ServiceProvider.GetRequiredService<ISummarizationService>();
+            var aiContext = scope.ServiceProvider.GetRequiredService<IAiContextAugmenter>();
+            var tzService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
+
+            switch (route.Skill)
+            {
+                case ButlerSkill.CalendarEvent:
+                    // Use caption as the event text, with image description as context
+                    var eventText = string.IsNullOrWhiteSpace(caption) ? description : caption;
+                    await HandleAddEventAsync(bot, chatId, eventText, scope, ct);
+                    break;
+                case ButlerSkill.Motivation:
+                    var motivation = await ExecuteMotivationAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tzService, ct);
+                    await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(motivation ?? "No motivation available."), cancellationToken: ct);
+                    break;
+                case ButlerSkill.Activities:
+                    var activities = await ExecuteActivitiesAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tzService, ct);
+                    await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(activities ?? "No activities available."), cancellationToken: ct);
+                    break;
+                case ButlerSkill.Summary:
+                    var summary = await ExecuteSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tzService, weekly: route.PreferWeeklySummary, taskName: route.PreferWeeklySummary ? "on-demand-weekly" : "on-demand-daily", ct);
+                    await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(summary ?? "No summary available."), cancellationToken: ct);
+                    break;
+                case ButlerSkill.DrawingReference:
+                default:
+                    // Save image analysis to context
+                    var title = string.IsNullOrWhiteSpace(caption) ? "Image" : caption;
+                    await contextService.AddPersonalAsync(
+                        body: description,
+                        title: title,
+                        mediaMetadata: string.IsNullOrWhiteSpace(caption) ? null : caption,
+                        mediaType: "image",
+                        ct: ct);
+
+                    var responseText = string.IsNullOrWhiteSpace(caption)
+                        ? $"Image analyzed and saved:\n\n{description}"
+                        : $"Image analyzed and saved:\n\nCaption: {caption}\n\nAnalysis: {description}";
+
+                    await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(responseText), cancellationToken: ct);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to process photo message");
+            await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), cancellationToken: ct);
+        }
     }
 
     private async Task HandleCallbackQueryAsync(ITelegramBotClient bot, CallbackQuery callbackQuery, CancellationToken ct)

@@ -171,6 +171,9 @@ builder.Services.AddHttpClient<IDrawingReferenceService, UnsplashDrawingReferenc
 builder.Services.AddSingleton<IRandomDrawingTopicService, RandomDrawingTopicService>();
 builder.Services.AddSingleton<IGoogleCalendarEventService, GoogleCalendarEventService>();
 builder.Services.AddHttpClient<ICalendarEventParser, OpenAiCalendarEventParser>();
+builder.Services.AddScoped<IMediaDownloadService, TelegramMediaDownloadService>();
+builder.Services.AddHttpClient<IAudioTranscriptionService, OpenAiWhisperTranscriptionService>();
+builder.Services.AddHttpClient<IImageAnalysisService, OpenAiVisionAnalysisService>();
 builder.Services.AddScoped<AiSettingsResolver>();
 builder.Services.AddHostedService<SchedulerService>();
 

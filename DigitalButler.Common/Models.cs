@@ -21,6 +21,10 @@ public class ContextItem
     public string? ExternalId { get; set; }
     public string? Category { get; set; }
     public string? Summary { get; set; }
+
+    // Media metadata: stores transcripts for voice or descriptions for images
+    public string? MediaMetadata { get; set; }
+    public string? MediaType { get; set; } // "voice", "image"
 }
 
 public class Instruction

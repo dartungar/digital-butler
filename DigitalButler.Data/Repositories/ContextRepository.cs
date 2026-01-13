@@ -18,9 +18,9 @@ public sealed class ContextRepository
 
         const string sql = """
             INSERT INTO ContextItems (
-                Id, Source, Title, Body, RelevantDate, IsTimeless, CreatedAt, UpdatedAt, ExternalId, Category, Summary
+                Id, Source, Title, Body, RelevantDate, IsTimeless, CreatedAt, UpdatedAt, ExternalId, Category, Summary, MediaMetadata, MediaType
             ) VALUES (
-                @Id, @Source, @Title, @Body, @RelevantDate, @IsTimeless, @CreatedAt, @UpdatedAt, @ExternalId, @Category, @Summary
+                @Id, @Source, @Title, @Body, @RelevantDate, @IsTimeless, @CreatedAt, @UpdatedAt, @ExternalId, @Category, @Summary, @MediaMetadata, @MediaType
             );
             """;
 
@@ -36,7 +36,9 @@ public sealed class ContextRepository
             item.UpdatedAt,
             item.ExternalId,
             item.Category,
-            item.Summary
+            item.Summary,
+            item.MediaMetadata,
+            item.MediaType
         });
 
         return item;
@@ -46,7 +48,7 @@ public sealed class ContextRepository
     {
         await using var conn = await _db.OpenAsync(ct);
         const string sql = """
-            SELECT Id, Source, Title, Body, RelevantDate, IsTimeless, CreatedAt, UpdatedAt, ExternalId, Category, Summary
+            SELECT Id, Source, Title, Body, RelevantDate, IsTimeless, CreatedAt, UpdatedAt, ExternalId, Category, Summary, MediaMetadata, MediaType
             FROM ContextItems
             ORDER BY UpdatedAt DESC
             LIMIT @Take;
@@ -161,7 +163,7 @@ public sealed class ContextRepository
         var cutoff = DateTimeOffset.UtcNow.AddDays(-daysBack);
 
         const string sql = """
-            SELECT Id, Source, Title, Body, RelevantDate, IsTimeless, CreatedAt, UpdatedAt, ExternalId, Category, Summary
+            SELECT Id, Source, Title, Body, RelevantDate, IsTimeless, CreatedAt, UpdatedAt, ExternalId, Category, Summary, MediaMetadata, MediaType
             FROM ContextItems
             WHERE IsTimeless = 1 OR RelevantDate >= @Cutoff
             ORDER BY UpdatedAt DESC
@@ -177,7 +179,7 @@ public sealed class ContextRepository
         await using var conn = await _db.OpenAsync(ct);
 
         const string sql = """
-            SELECT Id, Source, Title, Body, RelevantDate, IsTimeless, CreatedAt, UpdatedAt, ExternalId, Category, Summary
+            SELECT Id, Source, Title, Body, RelevantDate, IsTimeless, CreatedAt, UpdatedAt, ExternalId, Category, Summary, MediaMetadata, MediaType
             FROM ContextItems
             WHERE IsTimeless = 1
                OR (RelevantDate IS NOT NULL AND RelevantDate >= @Start AND RelevantDate < @End)
@@ -245,9 +247,9 @@ public sealed class ContextRepository
 
                 const string insertSql = """
                     INSERT INTO ContextItems (
-                        Id, Source, Title, Body, RelevantDate, IsTimeless, CreatedAt, UpdatedAt, ExternalId, Category, Summary
+                        Id, Source, Title, Body, RelevantDate, IsTimeless, CreatedAt, UpdatedAt, ExternalId, Category, Summary, MediaMetadata, MediaType
                     ) VALUES (
-                        @Id, @Source, @Title, @Body, @RelevantDate, @IsTimeless, @CreatedAt, @UpdatedAt, @ExternalId, @Category, @Summary
+                        @Id, @Source, @Title, @Body, @RelevantDate, @IsTimeless, @CreatedAt, @UpdatedAt, @ExternalId, @Category, @Summary, @MediaMetadata, @MediaType
                     );
                     """;
 
@@ -263,7 +265,9 @@ public sealed class ContextRepository
                     item.UpdatedAt,
                     item.ExternalId,
                     item.Category,
-                    item.Summary
+                    item.Summary,
+                    item.MediaMetadata,
+                    item.MediaType
                 }, tx);
                 affected += 1;
             }
@@ -290,6 +294,8 @@ public sealed class ContextRepository
         public string? ExternalId { get; set; }
         public string? Category { get; set; }
         public string? Summary { get; set; }
+        public string? MediaMetadata { get; set; }
+        public string? MediaType { get; set; }
     }
 
     private static ContextItem Map(ContextItemRow row) => new()
@@ -304,6 +310,8 @@ public sealed class ContextRepository
         UpdatedAt = row.UpdatedAt,
         ExternalId = row.ExternalId,
         Category = row.Category,
-        Summary = row.Summary
+        Summary = row.Summary,
+        MediaMetadata = row.MediaMetadata,
+        MediaType = row.MediaType
     };
 }

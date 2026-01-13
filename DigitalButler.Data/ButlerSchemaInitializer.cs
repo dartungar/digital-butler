@@ -122,6 +122,24 @@ public sealed class ButlerSchemaInitializer
             // Intentionally ignored
         }
 
+        try
+        {
+            await conn.ExecuteAsync("ALTER TABLE ContextItems ADD COLUMN MediaMetadata TEXT NULL;");
+        }
+        catch
+        {
+            // Intentionally ignored
+        }
+
+        try
+        {
+            await conn.ExecuteAsync("ALTER TABLE ContextItems ADD COLUMN MediaType TEXT NULL;");
+        }
+        catch
+        {
+            // Intentionally ignored
+        }
+
         // Indexes (idempotent)
         await conn.ExecuteAsync(
             """
