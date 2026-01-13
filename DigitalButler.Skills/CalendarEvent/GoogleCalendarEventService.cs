@@ -99,6 +99,15 @@ public sealed class GoogleCalendarEventService : IGoogleCalendarEventService
                 }
             };
 
+            _logger.LogInformation(
+                "GCal insert payload (key fields): start={Start:o} startTz={StartTz} startRaw={StartRaw} end={End:o} endTz={EndTz} endRaw={EndRaw}",
+                calendarEvent.Start.DateTimeDateTimeOffset,
+                calendarEvent.Start.TimeZone,
+                calendarEvent.Start.DateTimeRaw,
+                calendarEvent.End.DateTimeDateTimeOffset,
+                calendarEvent.End.TimeZone,
+                calendarEvent.End.DateTimeRaw);
+
             if (!string.IsNullOrWhiteSpace(ev.Location))
             {
                 calendarEvent.Location = ev.Location;

@@ -1068,6 +1068,8 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
         var tzService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
         var tz = await tzService.GetTimeZoneInfoAsync(ct);
 
+        _logger.LogInformation("Calendar event timezone resolved: {TimeZoneId} (baseUtcOffset={Offset})", tz.Id, tz.BaseUtcOffset);
+
         try
         {
             var parsed = await parser.ParseAsync(eventText, tz, ct);

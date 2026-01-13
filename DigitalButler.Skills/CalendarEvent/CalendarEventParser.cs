@@ -55,31 +55,26 @@ public sealed class OpenAiCalendarEventParser : ICalendarEventParser
 
         try
         {
-            var requestBody = new
-            {
-                model = settings.Model ?? "gpt-4o-mini",
-                messages = new[]
-                {
-                    new { role = "system", content = systemPrompt },
-                    new { role = "user", content = naturalLanguageInput }
-                },
-                temperature = 0.1,
-                max_tokens = 500
-            };
+            // Use the OpenAI Responses API (matches the rest of DigitalButler.Skills).
+            // This avoids model-specific token parameter differences in legacy chat completions.
+            var model = (settings.Model ?? "gpt-5-mini").Trim();
+            const int maxOutputTokens = 800;
 
-            var json = JsonSerializer.Serialize(requestBody);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var endpoint = OpenAiEndpoint.ResolveEndpoint(settings.BaseUrl);
 
-            var baseUrl = settings.BaseUrl?.TrimEnd('/') ?? "https://api.openai.com/v1";
-            var endpoint = $"{baseUrl}/chat/completions";
-
-            var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
-            {
-                Content = content
-            };
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ApiKey);
+            request.Content = new StringContent(JsonSerializer.Serialize(new
+            {
+                model,
+                instructions = systemPrompt,
+                input = naturalLanguageInput,
+                reasoning = new { effort = "low" },
+                text = new { verbosity = "low" },
+                max_output_tokens = maxOutputTokens
+            }), Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.SendAsync(request, ct);
+            using var response = await _httpClient.SendAsync(request, ct);
             var responseBody = await response.Content.ReadAsStringAsync(ct);
 
             if (!response.IsSuccessStatusCode)
@@ -88,8 +83,8 @@ public sealed class OpenAiCalendarEventParser : ICalendarEventParser
                 return null;
             }
 
-            var aiResponse = JsonSerializer.Deserialize<ChatCompletionResponse>(responseBody);
-            var messageContent = aiResponse?.Choices?.FirstOrDefault()?.Message?.Content;
+            using var doc = JsonDocument.Parse(responseBody);
+            var messageContent = OpenAiEndpoint.ExtractResponsesText(doc.RootElement);
 
             if (string.IsNullOrWhiteSpace(messageContent))
             {
@@ -122,7 +117,7 @@ public sealed class OpenAiCalendarEventParser : ICalendarEventParser
                 return null;
             }
 
-            if (!DateTimeOffset.TryParse(parsed.StartIso, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var startTime))
+            if (!TryParseStartTimeInUserTimeZone(parsed.StartIso, userTimeZone, out var startTime))
             {
                 _logger.LogWarning("Failed to parse start time: {StartIso}", parsed.StartIso);
                 return null;
@@ -157,7 +152,7 @@ public sealed class OpenAiCalendarEventParser : ICalendarEventParser
             Parse the user's input and output ONLY valid JSON (no markdown, no explanation):
             {
               "title": "Event title",
-              "start_iso": "2024-01-15T15:00:00+03:00",
+                            "start_iso": "2024-01-15T15:00:00+03:00",
               "duration_minutes": 60,
               "location": null,
               "description": null,
@@ -169,12 +164,43 @@ public sealed class OpenAiCalendarEventParser : ICalendarEventParser
             - If user says "next Monday", calculate the actual date
             - If no time is specified, default to 10:00
             - If no duration is specified, default to 60 minutes
-            - Include timezone offset in start_iso based on user's timezone
+            - start_iso MUST be in the user's timezone and MUST include the correct UTC offset (do NOT output UTC unless the user's timezone is UTC)
             - confidence should be 0.0-1.0, reflecting how certain you are about the parsing
 
             If you cannot parse the input (too vague, not an event, etc.), return:
             {"error": "reason", "confidence": 0}
             """;
+    }
+
+    private static bool TryParseStartTimeInUserTimeZone(string? startIso, TimeZoneInfo userTimeZone, out DateTimeOffset startTime)
+    {
+        startTime = default;
+        if (string.IsNullOrWhiteSpace(startIso))
+        {
+            return false;
+        }
+
+        // Important: Many models output an ISO timestamp with a UTC offset even when the user spoke
+        // in their local timezone. We interpret the *wall-clock* time in start_iso as being in the
+        // user's timezone, then attach the correct offset for that timezone.
+
+        if (DateTimeOffset.TryParse(startIso, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dto))
+        {
+            var local = DateTime.SpecifyKind(dto.DateTime, DateTimeKind.Unspecified);
+            var offset = userTimeZone.GetUtcOffset(local);
+            startTime = new DateTimeOffset(local, offset);
+            return true;
+        }
+
+        if (DateTime.TryParse(startIso, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt))
+        {
+            var local = DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
+            var offset = userTimeZone.GetUtcOffset(local);
+            startTime = new DateTimeOffset(local, offset);
+            return true;
+        }
+
+        return false;
     }
 
     private static string? ExtractJson(string text)
@@ -236,23 +262,5 @@ public sealed class OpenAiCalendarEventParser : ICalendarEventParser
 
         [JsonPropertyName("error")]
         public string? Error { get; set; }
-    }
-
-    private sealed class ChatCompletionResponse
-    {
-        [JsonPropertyName("choices")]
-        public List<Choice>? Choices { get; set; }
-
-        public sealed class Choice
-        {
-            [JsonPropertyName("message")]
-            public Message? Message { get; set; }
-        }
-
-        public sealed class Message
-        {
-            [JsonPropertyName("content")]
-            public string? Content { get; set; }
-        }
     }
 }
