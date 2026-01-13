@@ -10,6 +10,7 @@ using Telegram.Bot.Types.ReplyMarkups;
 using Polling = Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace DigitalButler.Telegram;
 
@@ -20,6 +21,7 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
     private readonly string _token;
     private readonly long _allowedUserId;
     private readonly TimeSpan _startupPingTimeout;
+    private readonly bool _forceIpv4;
     private TelegramBotClient? _bot;
     private CancellationTokenSource? _cts;
     private Task? _runLoop;
@@ -51,6 +53,12 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             timeoutSeconds = parsed;
         }
         _startupPingTimeout = TimeSpan.FromSeconds(timeoutSeconds);
+
+        var forceIpv4Str = config["TELEGRAM_FORCE_IPV4"];
+        _forceIpv4 = !string.IsNullOrWhiteSpace(forceIpv4Str) &&
+                 (forceIpv4Str.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                  forceIpv4Str.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                  forceIpv4Str.Equals("yes", StringComparison.OrdinalIgnoreCase));
         
         var allowedUserIdStr = config["TELEGRAM_ALLOWED_USER_ID"];
         _allowedUserId = string.IsNullOrWhiteSpace(allowedUserIdStr) 
@@ -104,16 +112,23 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
 
         while (!ct.IsCancellationRequested)
         {
+            CancellationTokenSource? pingCts = null;
+            var sw = Stopwatch.StartNew();
+
             try
             {
-                _bot = new TelegramBotClient(_token);
+                _bot = TelegramBotClientFactory.Create(_token, _forceIpv4);
 
                 // Avoid hanging forever on startup (TLS/network issues). Keep it short and retry.
-                using var pingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                pingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 pingCts.CancelAfter(_startupPingTimeout);
 
                 var me = await _bot.GetMeAsync(cancellationToken: pingCts.Token);
-                _logger.LogInformation("Bot connected as {Username}", me.Username);
+                _logger.LogInformation(
+                    "Bot connected as {Username} (forceIpv4={ForceIpv4}, elapsedMs={ElapsedMs})",
+                    me.Username,
+                    _forceIpv4,
+                    (long)sw.Elapsed.TotalMilliseconds);
 
                 _bot.StartReceiving(
                     updateHandler: HandleUpdateAsync,
@@ -131,11 +146,22 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
             catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
             {
                 // Most commonly a timeout from pingCts.CancelAfter(...).
+                var pingTimedOut = pingCts?.IsCancellationRequested == true;
+                var innermost = GetInnermostException(ex);
+
                 _logger.LogWarning(
-                    "Telegram bot startup ping cancelled/timed out after {TimeoutSeconds}s; retrying in {Delay}. Error: {ErrorType}",
+                    "Telegram bot startup ping cancelled/timed out after {TimeoutSeconds}s; retrying in {Delay}. " +
+                    "forceIpv4={ForceIpv4}, elapsedMs={ElapsedMs}, pingTimedOut={PingTimedOut}, " +
+                    "error={ErrorType}, message={Message}, inner={InnerType}: {InnerMessage}",
                     (int)_startupPingTimeout.TotalSeconds,
                     delay,
-                    ex.GetType().Name);
+                    _forceIpv4,
+                    (long)sw.Elapsed.TotalMilliseconds,
+                    pingTimedOut,
+                    ex.GetType().Name,
+                    ex.Message,
+                    innermost?.GetType().Name,
+                    innermost?.Message);
 
                 try
                 {
@@ -164,7 +190,21 @@ public class BotService : Microsoft.Extensions.Hosting.IHostedService, IDisposab
                 // Exponential backoff up to 60s.
                 delay = TimeSpan.FromSeconds(Math.Min(60, delay.TotalSeconds * 2));
             }
+            finally
+            {
+                pingCts?.Dispose();
+            }
         }
+    }
+
+    private static Exception? GetInnermostException(Exception ex)
+    {
+        var cur = ex.InnerException;
+        while (cur?.InnerException is not null)
+        {
+            cur = cur.InnerException;
+        }
+        return cur;
     }
 
     private async Task HandleUpdateAsync(ITelegramBotClient bot, Update update, CancellationToken ct)

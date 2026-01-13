@@ -192,7 +192,13 @@ if (!string.IsNullOrWhiteSpace(telegramToken) && !string.IsNullOrWhiteSpace(tele
 }
 if (!string.IsNullOrWhiteSpace(telegramToken))
 {
-    builder.Services.AddSingleton<ITelegramBotClient>(new TelegramBotClient(telegramToken));
+    var forceIpv4Str = builder.Configuration["TELEGRAM_FORCE_IPV4"];
+    var forceIpv4 = !string.IsNullOrWhiteSpace(forceIpv4Str) &&
+                    (forceIpv4Str.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                     forceIpv4Str.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                     forceIpv4Str.Equals("yes", StringComparison.OrdinalIgnoreCase));
+
+    builder.Services.AddSingleton<ITelegramBotClient>(_ => TelegramBotClientFactory.Create(telegramToken, forceIpv4));
 }
 
 builder.Services.AddScoped<ContextService>();

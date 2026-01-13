@@ -36,6 +36,9 @@ services:
       - "8080:8080"
     volumes:
       - butler-data:/data
+    # Workaround: on some hosts, user-defined compose bridge networks can lose NAT/masquerade rules.
+    # Using Docker's default `bridge` network restores outbound HTTPS (needed for Telegram/OpenAI/etc.).
+    network_mode: bridge
     restart: unless-stopped
 volumes:
   butler-data:
