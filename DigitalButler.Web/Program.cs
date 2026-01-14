@@ -191,7 +191,7 @@ var telegramToken = builder.Configuration["TELEGRAM_BOT_TOKEN"];
 var telegramAllowedUserId = builder.Configuration["TELEGRAM_ALLOWED_USER_ID"];
 if (!string.IsNullOrWhiteSpace(telegramToken) && !string.IsNullOrWhiteSpace(telegramAllowedUserId))
 {
-    builder.Services.AddHostedService<BotService>();
+    builder.Services.AddTelegramBot();
 }
 if (!string.IsNullOrWhiteSpace(telegramToken))
 {
