@@ -16,7 +16,7 @@ public interface ISummarySkillExecutor
 
 public interface IMotivationSkillExecutor
 {
-    Task<string> ExecuteAsync(CancellationToken ct);
+    Task<string> ExecuteAsync(string? userQuery, CancellationToken ct);
 }
 
 public interface IActivitiesSkillExecutor

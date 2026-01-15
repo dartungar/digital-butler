@@ -30,7 +30,7 @@ public sealed class MotivationSkillExecutor : IMotivationSkillExecutor
         _logger = logger;
     }
 
-    public async Task<string> ExecuteAsync(CancellationToken ct)
+    public async Task<string> ExecuteAsync(string? userQuery, CancellationToken ct)
     {
         var tz = await _tzService.GetTimeZoneInfoAsync(ct);
         var items = await _contextService.GetRelevantAsync(daysBack: 30, take: 250, ct: ct);
@@ -58,7 +58,7 @@ public sealed class MotivationSkillExecutor : IMotivationSkillExecutor
 
         // Motivation should be driven by Personal context and per-skill instructions only.
         var instructionsBySource = new Dictionary<ContextSource, string>();
-        var prompt = BuildSkillPrompt(cfg?.Content);
+        var prompt = BuildSkillPrompt(userQuery, cfg?.Content);
         return await _summarizer.SummarizeAsync(items, instructionsBySource, "motivation", prompt, ct);
     }
 
@@ -68,14 +68,30 @@ public sealed class MotivationSkillExecutor : IMotivationSkillExecutor
         return dict.TryGetValue(ButlerSkill.Motivation, out var v) ? v : null;
     }
 
-    private static string BuildSkillPrompt(string? custom)
+    private static string BuildSkillPrompt(string? userQuery, string? custom)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("Skill: motivation");
-        sb.AppendLine("Write a short motivational message grounded ONLY in Personal context items.");
+
+        if (!string.IsNullOrWhiteSpace(userQuery))
+        {
+            sb.AppendLine();
+            sb.AppendLine($"User's message: \"{userQuery}\"");
+            sb.AppendLine();
+            sb.AppendLine("Write a motivational message that directly addresses what the user said.");
+            sb.AppendLine("If the user's message relates to something in their Personal context, incorporate that context naturally.");
+            sb.AppendLine("If the user's message is generic or unrelated to their context, focus on addressing their specific feeling or situation without forcing context references.");
+        }
+        else
+        {
+            sb.AppendLine("Write a short motivational message grounded in Personal context items.");
+        }
+
+        sb.AppendLine();
         sb.AppendLine("Ignore calendar/events/emails unless they are part of Personal context.");
         sb.AppendLine("Do not summarize the notes; do not quote them; use them only as inspiration.");
         sb.AppendLine("Do not mention that you are an AI or that you were given 'context items'.");
+
         if (!string.IsNullOrWhiteSpace(custom))
         {
             sb.AppendLine();

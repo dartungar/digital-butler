@@ -157,7 +157,7 @@ public sealed class TextMessageHandler : ITextMessageHandler
 
         if (text.StartsWith("/motivation", StringComparison.OrdinalIgnoreCase))
         {
-            await HandleMotivationAsync(bot, chatId, ct);
+            await HandleMotivationAsync(bot, chatId, userQuery: null, ct);
             return;
         }
 
@@ -209,12 +209,12 @@ public sealed class TextMessageHandler : ITextMessageHandler
         }
     }
 
-    private async Task HandleMotivationAsync(ITelegramBotClient bot, long chatId, CancellationToken ct)
+    private async Task HandleMotivationAsync(ITelegramBotClient bot, long chatId, string? userQuery, CancellationToken ct)
     {
         await SendWithKeyboardAsync(bot, chatId, "Generating motivation...", ct);
         try
         {
-            var result = await _motivationExecutor.ExecuteAsync(ct);
+            var result = await _motivationExecutor.ExecuteAsync(userQuery, ct);
             if (string.IsNullOrWhiteSpace(result)) result = "No motivation available.";
 
             await bot.SendTextMessageAsync(chatId, TruncateForTelegram(result),
@@ -348,7 +348,7 @@ public sealed class TextMessageHandler : ITextMessageHandler
         switch (route.Skill)
         {
             case ButlerSkill.Motivation:
-                await HandleMotivationAsync(bot, chatId, ct);
+                await HandleMotivationAsync(bot, chatId, userQuery: text, ct);
                 break;
             case ButlerSkill.Activities:
                 await HandleActivitiesAsync(bot, chatId, ct);

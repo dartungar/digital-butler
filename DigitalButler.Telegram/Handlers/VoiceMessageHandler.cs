@@ -97,7 +97,7 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
 
                 case ButlerSkill.Motivation:
                     await SendWithKeyboardAsync(bot, chatId, $"Transcribed: \"{transcribedText}\"\n\nGenerating motivation...", ct);
-                    var motivation = await _motivationExecutor.ExecuteAsync(ct);
+                    var motivation = await _motivationExecutor.ExecuteAsync(userQuery: transcribedText, ct);
                     await bot.SendTextMessageAsync(chatId, TruncateForTelegram(motivation ?? "No motivation available."),
                         replyMarkup: KeyboardFactory.BuildMotivationRefreshKeyboard(),
                         cancellationToken: ct);

@@ -100,7 +100,7 @@ public sealed class PhotoMessageHandler : IPhotoMessageHandler
                     break;
 
                 case ButlerSkill.Motivation:
-                    var motivation = await _motivationExecutor.ExecuteAsync(ct);
+                    var motivation = await _motivationExecutor.ExecuteAsync(userQuery: textForRouting, ct);
                     await bot.SendTextMessageAsync(chatId, TruncateForTelegram(motivation ?? "No motivation available."),
                         replyMarkup: KeyboardFactory.BuildMotivationRefreshKeyboard(),
                         cancellationToken: ct);

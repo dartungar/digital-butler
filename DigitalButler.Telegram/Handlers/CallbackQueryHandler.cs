@@ -130,7 +130,7 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
             case "motivation":
                 await SendProcessingAndExecuteAsync(bot, chatId, "Generating motivation...", async () =>
                 {
-                    var result = await _motivationExecutor.ExecuteAsync(ct);
+                    var result = await _motivationExecutor.ExecuteAsync(userQuery: null, ct);
                     return (TruncateForTelegram(result ?? "No motivation available."), KeyboardFactory.BuildMotivationRefreshKeyboard());
                 }, ct);
                 break;
@@ -179,7 +179,7 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
 
         await SendProcessingAndExecuteAsync(bot, chatId, "Generating motivation...", async () =>
         {
-            var result = await _motivationExecutor.ExecuteAsync(ct);
+            var result = await _motivationExecutor.ExecuteAsync(userQuery: null, ct);
             return (TruncateForTelegram(result ?? "No motivation available."), KeyboardFactory.BuildMotivationRefreshKeyboard());
         }, ct);
     }
