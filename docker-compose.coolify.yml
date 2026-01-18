@@ -38,7 +38,7 @@ services:
       - OBSIDIAN_LOOKBACK_DAYS=${OBSIDIAN_LOOKBACK_DAYS:-30}
       - Database__SqlitePath=/data/butler.db
     ports:
-      - "8080:8080"
+      - "7766:8080"
     volumes:
       - butler-data:/data
       - /var/notes:/var/notes:ro
