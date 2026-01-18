@@ -1,0 +1,85 @@
+@page "/skills/calendar-event"
+@using DigitalButler.Common
+@inject DigitalButler.Data.Repositories.SkillInstructionRepository SkillRepo
+
+<PageTitle>Calendar Event</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">Calendar Event</h3>
+    <p class="subtitle is-6">Configure the calendar event skill for creating events from natural language.</p>
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Skill Instructions</h5>
+        <p class="subtitle is-6">Custom instructions for parsing calendar events from text.</p>
+    </div>
+
+    @if (_skillConfig is null)
+    {
+        <p>Loading...</p>
+    }
+    else
+    {
+        <EditForm Model="this" OnValidSubmit="SaveSkillAsync">
+            <div class="field">
+                <label class="label">Instructions</label>
+                <div class="control">
+                    <InputTextArea class="textarea" style="min-height: 150px;" @bind-Value="_skillConfig.Content"
+                        placeholder="Custom instructions for calendar event parsing..." />
+                </div>
+            </div>
+
+            <div class="buttons">
+                <button class="button is-primary" type="submit">Save Skill Config</button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_skillMessage))
+            {
+                <div class="notification is-info is-light">@_skillMessage</div>
+            }
+        </EditForm>
+    }
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Configuration</h5>
+        <p>Calendar event creation requires a Google Service Account. Configure via environment variables:</p>
+        <pre><code>GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+GOOGLE_CALENDAR_ID=your_calendar_id@gmail.com</code></pre>
+    </div>
+</div>
+
+@code {
+    private const ButlerSkill Skill = ButlerSkill.CalendarEvent;
+
+    private SkillInstruction? _skillConfig;
+    private string? _skillMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var skills = await SkillRepo.GetAllAsync();
+        _skillConfig = skills.FirstOrDefault(x => x.Skill == Skill);
+        if (_skillConfig is null)
+        {
+            _skillConfig = new SkillInstruction { Skill = Skill, Content = string.Empty, ContextSourcesMask = 0, EnableAiContext = false };
+        }
+    }
+
+    private async Task SaveSkillAsync()
+    {
+        if (_skillConfig is null) return;
+        var skills = await SkillRepo.GetAllAsync();
+        var existing = skills.FirstOrDefault(x => x.Skill == Skill);
+        if (existing is null)
+        {
+            skills.Add(_skillConfig);
+        }
+        else
+        {
+            existing.Content = _skillConfig.Content;
+        }
+        await SkillRepo.ReplaceAllAsync(skills);
+        _skillMessage = "Saved.";
+    }
+}

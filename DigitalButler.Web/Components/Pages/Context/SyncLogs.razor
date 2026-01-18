@@ -1,0 +1,216 @@
+@page "/context/sync"
+@inject IManualSyncRunner ManualSyncRunner
+@inject ContextUpdateLogRepository LogRepo
+
+@using DigitalButler.Context
+@using DigitalButler.Data.Repositories
+
+<PageTitle>Sync Logs</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">Context Sync</h3>
+    <p class="subtitle is-6">Manually trigger context source synchronization and view sync history.</p>
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Manual Sync</h5>
+    </div>
+    <div class="buttons">
+        <button class="button is-link" type="button" disabled="@_syncing" @onclick="RunSyncAsync">
+            @if (_syncing)
+            {
+                <span>Syncing all...</span>
+            }
+            else
+            {
+                <span>Sync All</span>
+            }
+        </button>
+
+        <button class="button is-link is-light" type="button" disabled="@_obsidianSyncing" @onclick="RunObsidianSyncAsync">
+            @if (_obsidianSyncing)
+            {
+                <span>Obsidian...</span>
+            }
+            else
+            {
+                <span>Sync Obsidian</span>
+            }
+        </button>
+
+        <button class="button is-link is-light" type="button" disabled="@_calendarSyncing" @onclick="RunCalendarSyncAsync">
+            @if (_calendarSyncing)
+            {
+                <span>Calendar...</span>
+            }
+            else
+            {
+                <span>Sync Calendar</span>
+            }
+        </button>
+
+        <button class="button is-link is-light" type="button" disabled="@_gmailSyncing" @onclick="RunGmailSyncAsync">
+            @if (_gmailSyncing)
+            {
+                <span>Gmail...</span>
+            }
+            else
+            {
+                <span>Sync Gmail</span>
+            }
+        </button>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_syncMessage))
+    {
+        <div class="notification is-info is-light" style="white-space: pre-wrap;">@_syncMessage</div>
+    }
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Sync History</h5>
+    </div>
+
+    @if (_logs is null)
+    {
+        <p>Loading...</p>
+    }
+    else if (_logs.Count == 0)
+    {
+        <p>No sync logs yet.</p>
+    }
+    else
+    {
+        <div class="table-container">
+            <table class="table is-fullwidth is-striped is-hoverable is-narrow">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Source</th>
+                        <th>Status</th>
+                        <th>Scanned</th>
+                        <th>Added</th>
+                        <th>Updated</th>
+                        <th>Unchanged</th>
+                        <th>Duration</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var log in _logs)
+                    {
+                        <tr class="@(log.Status == "error" ? "has-background-danger-light" : null)">
+                            <td style="white-space: nowrap;">@log.Timestamp.LocalDateTime.ToString("g")</td>
+                            <td>@log.Source</td>
+                            <td>
+                                @if (log.Status == "success")
+                                {
+                                    <span class="tag is-success is-light">Success</span>
+                                }
+                                else if (log.Status == "error")
+                                {
+                                    <span class="tag is-danger is-light">Error</span>
+                                }
+                                else
+                                {
+                                    <span class="tag">@log.Status</span>
+                                }
+                            </td>
+                            <td>@log.ItemsScanned</td>
+                            <td>@log.ItemsAdded</td>
+                            <td>@log.ItemsUpdated</td>
+                            <td>@log.ItemsUnchanged</td>
+                            <td>@log.DurationMs ms</td>
+                            <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis;" title="@log.Message">@log.Message</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private List<ContextUpdateLog>? _logs;
+
+    private bool _syncing;
+    private bool _obsidianSyncing;
+    private bool _calendarSyncing;
+    private bool _gmailSyncing;
+    private string? _syncMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _logs = await LogRepo.GetRecentAsync(100);
+    }
+
+    private async Task RunSyncAsync()
+    {
+        _syncing = true;
+        _syncMessage = null;
+        try
+        {
+            var result = await ManualSyncRunner.RunAllAsync();
+            _syncMessage = $"Sync finished in {(result.FinishedAt - result.StartedAt).TotalSeconds:0.#}s.\n" +
+                           string.Join("\n", result.Messages);
+            _logs = await LogRepo.GetRecentAsync(100);
+        }
+        finally
+        {
+            _syncing = false;
+        }
+    }
+
+    private async Task RunObsidianSyncAsync()
+    {
+        _obsidianSyncing = true;
+        _syncMessage = null;
+        try
+        {
+            var result = await ManualSyncRunner.RunSourceAsync(ContextSource.Obsidian);
+            _syncMessage = $"Obsidian sync finished in {(result.FinishedAt - result.StartedAt).TotalSeconds:0.#}s.\n" +
+                           string.Join("\n", result.Messages);
+            _logs = await LogRepo.GetRecentAsync(100);
+        }
+        finally
+        {
+            _obsidianSyncing = false;
+        }
+    }
+
+    private async Task RunCalendarSyncAsync()
+    {
+        _calendarSyncing = true;
+        _syncMessage = null;
+        try
+        {
+            var result = await ManualSyncRunner.RunSourceAsync(ContextSource.GoogleCalendar);
+            _syncMessage = $"Calendar sync finished in {(result.FinishedAt - result.StartedAt).TotalSeconds:0.#}s.\n" +
+                           string.Join("\n", result.Messages);
+            _logs = await LogRepo.GetRecentAsync(100);
+        }
+        finally
+        {
+            _calendarSyncing = false;
+        }
+    }
+
+    private async Task RunGmailSyncAsync()
+    {
+        _gmailSyncing = true;
+        _syncMessage = null;
+        try
+        {
+            var result = await ManualSyncRunner.RunSourceAsync(ContextSource.Gmail);
+            _syncMessage = $"Gmail sync finished in {(result.FinishedAt - result.StartedAt).TotalSeconds:0.#}s.\n" +
+                           string.Join("\n", result.Messages);
+            _logs = await LogRepo.GetRecentAsync(100);
+        }
+        finally
+        {
+            _gmailSyncing = false;
+        }
+    }
+}

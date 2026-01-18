@@ -136,14 +136,15 @@ public class SchedulerService : BackgroundService
 
         var items = await contextService.GetForWindowAsync(start, end, take: taskName == "weekly-summary" ? 300 : 200, ct: ct);
 
-        var cfg = await skillInstructionService.GetFullBySkillsAsync(new[] { ButlerSkill.Summary }, ct);
-        cfg.TryGetValue(ButlerSkill.Summary, out var summaryCfg);
-        var allowedMask = SkillContextDefaults.ResolveSourcesMask(ButlerSkill.Summary, summaryCfg?.ContextSourcesMask ?? -1);
+        var skill = taskName == "weekly-summary" ? ButlerSkill.WeeklySummary : ButlerSkill.DailySummary;
+        var cfg = await skillInstructionService.GetFullBySkillsAsync(new[] { skill }, ct);
+        cfg.TryGetValue(skill, out var summaryCfg);
+        var allowedMask = SkillContextDefaults.ResolveSourcesMask(skill, summaryCfg?.ContextSourcesMask ?? -1);
         items = items.Where(x => ContextSourceMask.Contains(allowedMask, x.Source)).ToList();
 
         if (summaryCfg?.EnableAiContext == true)
         {
-            var snippet = await aiContext.GenerateAsync(ButlerSkill.Summary, items, taskName, ct);
+            var snippet = await aiContext.GenerateAsync(skill, items, taskName, ct);
             if (!string.IsNullOrWhiteSpace(snippet))
             {
                 items.Add(new ContextItem

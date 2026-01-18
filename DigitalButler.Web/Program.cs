@@ -119,6 +119,11 @@ MapEnv(envOverrides, "GMAIL_UNREAD_ONLY_DEFAULT", "Gmail:UnreadOnlyDefault");
 MapEnv(envOverrides, "GMAIL_DAYS_BACK_DEFAULT", "Gmail:DaysBackDefault");
 MapEnv(envOverrides, "GMAIL_MAX_MESSAGES_DEFAULT", "Gmail:MaxMessagesDefault");
 
+// Obsidian env vars
+MapEnv(envOverrides, "OBSIDIAN_VAULT_PATH", "Obsidian:VaultPath");
+MapEnv(envOverrides, "OBSIDIAN_DAILY_NOTES_PATTERN", "Obsidian:DailyNotesPattern");
+MapEnv(envOverrides, "OBSIDIAN_LOOKBACK_DAYS", "Obsidian:LookbackDays");
+
 if (envOverrides.Count > 0)
 {
     builder.Configuration.AddInMemoryCollection(envOverrides);
@@ -137,6 +142,9 @@ builder.Services.AddScoped<ScheduleRepository>();
 builder.Services.AddScoped<GoogleCalendarFeedRepository>();
 builder.Services.AddScoped<GoogleOAuthTokenRepository>();
 builder.Services.AddScoped<AppSettingsRepository>();
+builder.Services.AddScoped<ObsidianDailyNotesRepository>();
+builder.Services.AddScoped<ContextUpdateLogRepository>();
+builder.Services.AddScoped<ObsidianWeeklySummaryRepository>();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -163,6 +171,7 @@ builder.Services.Configure<GoogleCalendarOptions>(builder.Configuration.GetSecti
 builder.Services.Configure<GmailOptions>(builder.Configuration.GetSection("Gmail"));
 builder.Services.Configure<UnsplashOptions>(builder.Configuration.GetSection("Unsplash"));
 builder.Services.Configure<GoogleCalendarOAuthOptions>(builder.Configuration.GetSection("GoogleCalendarOAuth"));
+builder.Services.Configure<ObsidianOptions>(builder.Configuration.GetSection("Obsidian"));
 builder.Services.AddHttpClient<ISummarizationService, OpenAiSummarizationService>();
 builder.Services.AddHttpClient<ISkillRouter, OpenAiSkillRouter>();
 builder.Services.AddHttpClient<IAiContextAugmenter, OpenAiContextAugmenter>();
@@ -181,6 +190,8 @@ builder.Services.AddHostedService<SchedulerService>();
 builder.Services.AddScoped<PersonalContextSource>();
 builder.Services.AddHttpClient<GoogleCalendarContextSource>();
 builder.Services.AddScoped<GmailContextSource>();
+builder.Services.AddScoped<ObsidianDailyNotesContextSource>();
+builder.Services.AddScoped<IObsidianAnalysisService, ObsidianAnalysisService>();
 
 // Context updater registry - allows lookup by source
 builder.Services.AddScoped<IContextUpdaterRegistry, ContextUpdaterRegistry>();

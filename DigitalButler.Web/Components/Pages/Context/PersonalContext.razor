@@ -1,0 +1,286 @@
+@page "/context/personal"
+@inject ContextService ContextService
+@inject InstructionRepository InstructionRepo
+
+@using DigitalButler.Context
+@using DigitalButler.Data.Repositories
+
+<PageTitle>Personal Context</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">Personal Context</h3>
+    <p class="subtitle is-6">Manage your personal notes and context items.</p>
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Add Personal Note</h5>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_addMessage))
+    {
+        <div class="notification is-info is-light">@_addMessage</div>
+    }
+
+    <EditForm Model="this" OnValidSubmit="AddAsync">
+        <div class="field">
+            <label class="label">Title</label>
+            <div class="control">
+                <InputText class="input" @bind-Value="_newTitle" placeholder="Note title" />
+            </div>
+        </div>
+
+        <div class="field">
+            <label class="label">Body</label>
+            <div class="control">
+                <InputTextArea class="textarea" style="min-height: 100px;" @bind-Value="_newBody" placeholder="Your note content..." />
+            </div>
+        </div>
+
+        <div class="columns">
+            <div class="column">
+                <div class="field">
+                    <label class="label">Relevant date (optional)</label>
+                    <div class="control">
+                        <InputDate class="input" TValue="DateTime?" @bind-Value="_newRelevantDate" />
+                    </div>
+                </div>
+            </div>
+            <div class="column">
+                <div class="field">
+                    <label class="label">Time</label>
+                    <div class="control">
+                        <InputText class="input" type="time" @bind-Value="_newRelevantTime" />
+                    </div>
+                </div>
+            </div>
+            <div class="column">
+                <div class="field">
+                    <label class="label">Category</label>
+                    <div class="control">
+                        <InputText class="input" @bind-Value="_newCategory" placeholder="Optional" />
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="field">
+            <div class="control">
+                <label class="checkbox">
+                    <InputCheckbox @bind-Value="_newIsTimeless" />
+                    Timeless (not tied to a specific date)
+                </label>
+            </div>
+        </div>
+
+        <div class="buttons">
+            <button class="button is-primary" type="submit" disabled="@_adding">Add Note</button>
+        </div>
+    </EditForm>
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Instructions for Personal Context</h5>
+        <p class="subtitle is-6">Guide how personal context is summarized by AI.</p>
+    </div>
+
+    <EditForm Model="this" OnValidSubmit="SaveInstructionAsync">
+        <div class="field">
+            <div class="control">
+                <InputTextArea class="textarea" style="min-height: 120px;" @bind-Value="_instructionContent"
+                    placeholder="Instructions for summarizing personal notes..." />
+            </div>
+        </div>
+        <div class="buttons">
+            <button class="button is-primary" type="submit" disabled="@_savingInstruction">Save Instructions</button>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_instructionMessage))
+        {
+            <div class="notification is-info is-light">@_instructionMessage</div>
+        }
+    </EditForm>
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Recent Personal Items</h5>
+    </div>
+
+    @if (_items is null)
+    {
+        <p>Loading...</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p>No personal context items yet.</p>
+    }
+    else
+    {
+        <div class="table-container">
+            <table class="table is-fullwidth is-striped is-hoverable is-narrow">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Body</th>
+                        <th>Category</th>
+                        <th>Date</th>
+                        <th>Updated</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in _items)
+                    {
+                        <tr>
+                            <td>@item.Title</td>
+                            <td style="max-width: 400px; white-space: pre-wrap; overflow-wrap: anywhere;">
+                                @TruncateText(item.Body, 200)
+                            </td>
+                            <td>@item.Category</td>
+                            <td style="white-space: nowrap;">@item.RelevantDate?.LocalDateTime.ToString("g")</td>
+                            <td style="white-space: nowrap;">@item.UpdatedAt.LocalDateTime.ToString("g")</td>
+                            <td>
+                                <button class="button is-small is-danger is-light" @onclick="() => DeleteAsync(item.Id)">
+                                    Delete
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private List<ContextItem>? _items;
+
+    private string _newTitle = "Note";
+    private string _newBody = string.Empty;
+    private string? _newCategory;
+    private bool _newIsTimeless = true;
+    private DateTime? _newRelevantDate;
+    private string _newRelevantTime = "";
+    private bool _adding;
+    private string? _addMessage;
+
+    private string _instructionContent = string.Empty;
+    private bool _savingInstruction;
+    private string? _instructionMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var all = await ContextService.GetRecentAsync(take: 500);
+        _items = all.Where(x => x.Source == ContextSource.Personal).Take(50).ToList();
+
+        var instructions = await InstructionRepo.GetAllAsync();
+        var personal = instructions.FirstOrDefault(x => x.Source == ContextSource.Personal);
+        _instructionContent = personal?.Content ?? string.Empty;
+    }
+
+    private async Task AddAsync()
+    {
+        _addMessage = null;
+        if (string.IsNullOrWhiteSpace(_newBody))
+        {
+            _addMessage = "Body is required.";
+            return;
+        }
+
+        if (!TryBuildRelevantDate(_newRelevantDate, _newRelevantTime, out var relevantDate, out var error))
+        {
+            _addMessage = error;
+            return;
+        }
+
+        _adding = true;
+        try
+        {
+            var added = await ContextService.AddPersonalAsync(
+                body: _newBody,
+                title: _newTitle,
+                relevantDate: relevantDate,
+                isTimeless: _newIsTimeless,
+                category: _newCategory
+            );
+
+            _items ??= new List<ContextItem>();
+            _items.Insert(0, added);
+
+            _newBody = string.Empty;
+            _newTitle = "Note";
+            _newCategory = null;
+            _newRelevantDate = null;
+            _newRelevantTime = "";
+            _newIsTimeless = true;
+            _addMessage = "Added.";
+        }
+        finally
+        {
+            _adding = false;
+        }
+    }
+
+    private async Task DeleteAsync(Guid id)
+    {
+        await ContextService.DeleteAsync(id);
+        _items?.RemoveAll(x => x.Id == id);
+    }
+
+    private async Task SaveInstructionAsync()
+    {
+        _savingInstruction = true;
+        _instructionMessage = null;
+        try
+        {
+            var instructions = await InstructionRepo.GetAllAsync();
+            var personal = instructions.FirstOrDefault(x => x.Source == ContextSource.Personal);
+            if (personal is null)
+            {
+                personal = new Instruction { Source = ContextSource.Personal, Content = _instructionContent };
+                instructions.Add(personal);
+            }
+            else
+            {
+                personal.Content = _instructionContent;
+            }
+            await InstructionRepo.ReplaceAllAsync(instructions);
+            _instructionMessage = "Saved.";
+        }
+        finally
+        {
+            _savingInstruction = false;
+        }
+    }
+
+    private bool TryBuildRelevantDate(DateTime? date, string timeText, out DateTimeOffset? relevantDate, out string? error)
+    {
+        relevantDate = null;
+        error = null;
+
+        if (date is null)
+        {
+            return true;
+        }
+
+        var text = string.IsNullOrWhiteSpace(timeText) ? "00:00" : timeText;
+        if (!TimeOnly.TryParse(text, out var time))
+        {
+            error = "Invalid time. Use HH:mm.";
+            return false;
+        }
+
+        var d = date.Value;
+        var localDateTime = new DateTime(d.Year, d.Month, d.Day, time.Hour, time.Minute, 0, DateTimeKind.Local);
+        relevantDate = new DateTimeOffset(localDateTime);
+        return true;
+    }
+
+    private static string TruncateText(string text, int maxLength)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= maxLength)
+            return text;
+        return text[..maxLength] + "...";
+    }
+}

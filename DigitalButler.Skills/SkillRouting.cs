@@ -5,7 +5,11 @@ using DigitalButler.Common;
 
 namespace DigitalButler.Skills;
 
-public readonly record struct SkillRoute(ButlerSkill Skill, bool PreferWeeklySummary);
+public readonly record struct SkillRoute(ButlerSkill Skill)
+{
+    // Backwards compatibility: check if this is a weekly summary
+    public bool PreferWeeklySummary => Skill == ButlerSkill.WeeklySummary;
+}
 
 public interface ISkillRouter
 {
@@ -29,7 +33,7 @@ public sealed class OpenAiSkillRouter : ISkillRouter
     {
         if (string.IsNullOrWhiteSpace(text))
         {
-            return new SkillRoute(ButlerSkill.Summary, PreferWeeklySummary: false);
+            return new SkillRoute(ButlerSkill.DailySummary);
         }
 
         // Skill routing needs AI settings. Prefer task-specific configuration, but if this task
@@ -46,7 +50,7 @@ public sealed class OpenAiSkillRouter : ISkillRouter
         }
         if (string.IsNullOrWhiteSpace(settings.ApiKey) || string.IsNullOrWhiteSpace(settings.Model))
         {
-            return new SkillRoute(ButlerSkill.Summary, PreferWeeklySummary: false);
+            return new SkillRoute(ButlerSkill.DailySummary);
         }
 
         var endpoint = OpenAiEndpoint.ResolveEndpoint(settings.BaseUrl);
@@ -121,12 +125,12 @@ Answer: calendar_event
             _logger.LogWarning("Skill router raw response (truncated): {Raw}", rawPreview);
 
             _logger.LogWarning("Skill router returned unexpected token '{Token}'. Defaulting to daily summary.", token);
-            return new SkillRoute(ButlerSkill.Summary, PreferWeeklySummary: false);
+            return new SkillRoute(ButlerSkill.DailySummary);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Skill routing failed; defaulting to daily summary");
-            return new SkillRoute(ButlerSkill.Summary, PreferWeeklySummary: false);
+            return new SkillRoute(ButlerSkill.DailySummary);
         }
     }
 
@@ -163,22 +167,22 @@ Answer: calendar_event
         switch (token)
         {
             case "motivation":
-                route = new SkillRoute(ButlerSkill.Motivation, PreferWeeklySummary: false);
+                route = new SkillRoute(ButlerSkill.Motivation);
                 return true;
             case "activities":
-                route = new SkillRoute(ButlerSkill.Activities, PreferWeeklySummary: false);
+                route = new SkillRoute(ButlerSkill.Activities);
                 return true;
             case "drawing_reference":
-                route = new SkillRoute(ButlerSkill.DrawingReference, PreferWeeklySummary: false);
+                route = new SkillRoute(ButlerSkill.DrawingReference);
                 return true;
             case "calendar_event":
-                route = new SkillRoute(ButlerSkill.CalendarEvent, PreferWeeklySummary: false);
+                route = new SkillRoute(ButlerSkill.CalendarEvent);
                 return true;
             case "summary_weekly":
-                route = new SkillRoute(ButlerSkill.Summary, PreferWeeklySummary: true);
+                route = new SkillRoute(ButlerSkill.WeeklySummary);
                 return true;
             case "summary_daily":
-                route = new SkillRoute(ButlerSkill.Summary, PreferWeeklySummary: false);
+                route = new SkillRoute(ButlerSkill.DailySummary);
                 return true;
             default:
                 return false;

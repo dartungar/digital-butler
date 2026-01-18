@@ -5,6 +5,7 @@ public enum ContextSource
     GoogleCalendar,
     Gmail,
     Personal,
+    Obsidian,
     Other
 }
 
@@ -55,11 +56,12 @@ public class SummarySchedule
 
 public enum ButlerSkill
 {
-    Summary = 0,
+    DailySummary = 0,    // Was Summary
     Motivation = 1,
     Activities = 2,
     DrawingReference = 3,
-    CalendarEvent = 4
+    CalendarEvent = 4,
+    WeeklySummary = 5    // New
 }
 
 public class SkillInstruction
@@ -99,7 +101,8 @@ public static class SkillContextDefaults
     public static int DefaultSourcesMask(ButlerSkill skill)
         => skill switch
         {
-            ButlerSkill.Summary => ContextSourceMask.All(),
+            ButlerSkill.DailySummary => ContextSourceMask.All(),
+            ButlerSkill.WeeklySummary => ContextSourceMask.All(),
             ButlerSkill.Motivation => ContextSourceMask.For(ContextSource.Personal),
             ButlerSkill.Activities => ContextSourceMask.For(ContextSource.Personal),
             ButlerSkill.CalendarEvent => 0, // No context sources needed for event creation
@@ -169,4 +172,158 @@ public class GoogleOAuthToken
     public string Scope { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public class ObsidianDailyNote
+{
+    public DateOnly Date { get; set; }
+
+    // Numeric metrics
+    public int? LifeSatisfaction { get; set; }
+    public int? SelfEsteem { get; set; }
+    public int? Presence { get; set; }
+    public int? Energy { get; set; }
+    public int? Motivation { get; set; }
+    public int? Optimism { get; set; }
+    public int? Stress { get; set; }
+    public int? Irritability { get; set; }
+    public int? Obsession { get; set; }
+    public int? OfflineTime { get; set; }
+    public int? MeditationMinutes { get; set; }
+    public decimal? Weight { get; set; }
+
+    // Habit tracking (count = total emojis, items = list)
+    public int? SoulCount { get; set; }
+    public List<string>? SoulItems { get; set; }
+    public int? BodyCount { get; set; }
+    public List<string>? BodyItems { get; set; }
+    public int? AreasCount { get; set; }
+    public List<string>? AreasItems { get; set; }
+    public int? LifeCount { get; set; }
+    public List<string>? LifeItems { get; set; }
+    public int? IndulgingCount { get; set; }
+    public List<string>? IndulgingItems { get; set; }
+    public List<string>? WeatherItems { get; set; }
+
+    // Tasks
+    public List<string>? CompletedTasks { get; set; }
+    public List<string>? PendingTasks { get; set; }
+
+    // Content
+    public string? Notes { get; set; }
+    public List<string>? Tags { get; set; }
+
+    // Metadata
+    public string FilePath { get; set; } = string.Empty;
+    public DateTimeOffset? FileModifiedAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+public class ContextUpdateLog
+{
+    public long Id { get; set; }
+    public DateTimeOffset Timestamp { get; set; }
+    public string Source { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public int ItemsScanned { get; set; }
+    public int ItemsAdded { get; set; }
+    public int ItemsUpdated { get; set; }
+    public int ItemsUnchanged { get; set; }
+    public int DurationMs { get; set; }
+    public string? Message { get; set; }
+    public string? Details { get; set; }
+}
+
+/// <summary>
+/// Stored weekly summary generated from Obsidian daily notes.
+/// Used for historical analysis and week-over-week comparisons.
+/// </summary>
+public class ObsidianWeeklySummary
+{
+    public DateOnly WeekStart { get; set; }  // Monday of the week (PK)
+
+    // Aggregated metrics (averages for the week)
+    public decimal? AvgLifeSatisfaction { get; set; }
+    public decimal? AvgSelfEsteem { get; set; }
+    public decimal? AvgPresence { get; set; }
+    public decimal? AvgEnergy { get; set; }
+    public decimal? AvgMotivation { get; set; }
+    public decimal? AvgOptimism { get; set; }
+    public decimal? AvgStress { get; set; }
+    public decimal? AvgIrritability { get; set; }
+    public decimal? AvgObsession { get; set; }
+    public decimal? AvgOfflineTime { get; set; }
+    public int? TotalMeditationMinutes { get; set; }
+
+    // Habit totals for the week
+    public int? TotalSoulCount { get; set; }
+    public int? TotalBodyCount { get; set; }
+    public int? TotalAreasCount { get; set; }
+    public int? TotalLifeCount { get; set; }
+    public int? TotalIndulgingCount { get; set; }
+
+    // Task summary
+    public int? TotalCompletedTasks { get; set; }
+    public int? TotalPendingTasks { get; set; }
+
+    // Days with data
+    public int DaysWithData { get; set; }
+
+    // AI-generated summary text
+    public string? Summary { get; set; }
+
+    // Top tags for the week (JSON array)
+    public List<string>? TopTags { get; set; }
+
+    // Metadata
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Analysis result for daily/weekly summaries with comparison data.
+/// </summary>
+public class ObsidianAnalysisResult
+{
+    // Current period data
+    public DateOnly PeriodStart { get; set; }
+    public DateOnly PeriodEnd { get; set; }
+    public bool IsWeekly { get; set; }
+
+    // Aggregated metrics
+    public decimal? AvgEnergy { get; set; }
+    public decimal? AvgMotivation { get; set; }
+    public decimal? AvgLifeSatisfaction { get; set; }
+    public decimal? AvgStress { get; set; }
+    public decimal? AvgOptimism { get; set; }
+
+    // Habit totals
+    public int TotalSoulCount { get; set; }
+    public int TotalBodyCount { get; set; }
+    public int TotalAreasCount { get; set; }
+    public int TotalIndulgingCount { get; set; }
+    public int TotalMeditationMinutes { get; set; }
+
+    // Tasks
+    public int TotalCompletedTasks { get; set; }
+    public int TotalPendingTasks { get; set; }
+
+    // Content
+    public List<string> CompletedTasksList { get; set; } = new();
+    public List<string> PendingTasksList { get; set; } = new();
+    public List<string> JournalHighlights { get; set; } = new();
+    public List<string> TopTags { get; set; } = new();
+
+    // Days with data
+    public int DaysWithData { get; set; }
+
+    // Comparison data (deltas vs comparison period)
+    public decimal? EnergyDelta { get; set; }
+    public decimal? MotivationDelta { get; set; }
+    public decimal? StressDelta { get; set; }
+    public decimal? LifeSatisfactionDelta { get; set; }
+
+    // Comparison period info
+    public string? ComparisonPeriodLabel { get; set; }  // "yesterday", "last week", "last 4 weeks avg"
 }

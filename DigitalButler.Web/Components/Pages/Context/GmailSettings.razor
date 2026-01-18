@@ -1,0 +1,171 @@
+@page "/context/gmail-settings"
+@using DigitalButler.Context
+@using DigitalButler.Common
+@inject Microsoft.Extensions.Options.IOptions<GmailOptions> GmailOptions
+@inject DigitalButler.Data.Repositories.InstructionRepository InstructionRepo
+@inject DigitalButler.Data.Repositories.ScheduleRepository ScheduleRepo
+
+<PageTitle>Gmail</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">Gmail</h3>
+    <p class="subtitle is-6">Configure Gmail sync, schedule, and summarization instructions.</p>
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Configuration</h5>
+        <p>Gmail ingestion is configured via environment variables (no DB-stored credentials). For Gmail, use an <b>App Password</b>.</p>
+
+        <p>Set <code>GMAIL_ACCOUNTS</code> as a semicolon-separated list:</p>
+
+        <pre><code>GMAIL_ACCOUNTS="name|username|appPassword[|unreadOnly][|daysBack][|maxMessages];name2|user2|pass2..."</code></pre>
+
+        <p>
+            Current configured value is <b>@(string.IsNullOrWhiteSpace(GmailOptions.Value.Accounts) ? "(empty)" : "(set)")</b>.
+        </p>
+
+        <h6 class="title is-6">IMAP Defaults</h6>
+        <ul>
+            <li>Host: <code>@GmailOptions.Value.Host</code></li>
+            <li>Port: <code>@GmailOptions.Value.Port</code></li>
+            <li>Use SSL: <code>@GmailOptions.Value.UseSsl</code></li>
+            <li>UnreadOnlyDefault: <code>@GmailOptions.Value.UnreadOnlyDefault</code></li>
+            <li>DaysBackDefault: <code>@GmailOptions.Value.DaysBackDefault</code></li>
+            <li>MaxMessagesDefault: <code>@GmailOptions.Value.MaxMessagesDefault</code></li>
+        </ul>
+    </div>
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Sync Schedule</h5>
+        <p class="subtitle is-6">How often to fetch emails.</p>
+    </div>
+
+    @if (_schedule is not null)
+    {
+        <EditForm Model="this" OnValidSubmit="SaveScheduleAsync">
+            <div class="columns">
+                <div class="column is-one-third">
+                    <div class="field">
+                        <label class="label">Cron Expression</label>
+                        <div class="control">
+                            <InputText class="input" @bind-Value="_schedule.CronOrInterval" />
+                        </div>
+                        <p class="help">Default: <code>0 */1 * * *</code> (hourly)</p>
+                    </div>
+                </div>
+                <div class="column">
+                    <div class="field">
+                        <label class="label">Enabled</label>
+                        <div class="control">
+                            <label class="checkbox">
+                                <InputCheckbox @bind-Value="_schedule.Enabled" />
+                                Sync enabled
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="buttons">
+                <button class="button is-primary" type="submit">Save Schedule</button>
+            </div>
+        </EditForm>
+
+        @if (!string.IsNullOrWhiteSpace(_scheduleMessage))
+        {
+            <div class="notification is-info is-light">@_scheduleMessage</div>
+        }
+    }
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Summarization Instructions</h5>
+        <p class="subtitle is-6">Guide how emails are summarized by AI.</p>
+    </div>
+
+    <EditForm Model="this" OnValidSubmit="SaveInstructionAsync">
+        <div class="field">
+            <div class="control">
+                <InputTextArea class="textarea" style="min-height: 120px;" @bind-Value="_instructionContent"
+                    placeholder="Instructions for summarizing emails..." />
+            </div>
+        </div>
+        <div class="buttons">
+            <button class="button is-primary" type="submit" disabled="@_savingInstruction">Save Instructions</button>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_instructionMessage))
+        {
+            <div class="notification is-info is-light">@_instructionMessage</div>
+        }
+    </EditForm>
+</div>
+
+@code {
+    private ScheduleConfig? _schedule;
+    private string? _scheduleMessage;
+
+    private string _instructionContent = string.Empty;
+    private bool _savingInstruction;
+    private string? _instructionMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var schedules = await ScheduleRepo.GetAllUpdateSchedulesAsync();
+        _schedule = schedules.FirstOrDefault(x => x.Source == ContextSource.Gmail);
+        if (_schedule is null)
+        {
+            _schedule = new ScheduleConfig { Source = ContextSource.Gmail, CronOrInterval = "0 */1 * * *", Enabled = true };
+        }
+
+        var instructions = await InstructionRepo.GetAllAsync();
+        var gmail = instructions.FirstOrDefault(x => x.Source == ContextSource.Gmail);
+        _instructionContent = gmail?.Content ?? string.Empty;
+    }
+
+    private async Task SaveScheduleAsync()
+    {
+        if (_schedule is null) return;
+        var schedules = await ScheduleRepo.GetAllUpdateSchedulesAsync();
+        var existing = schedules.FirstOrDefault(x => x.Source == ContextSource.Gmail);
+        if (existing is null)
+        {
+            schedules.Add(_schedule);
+        }
+        else
+        {
+            existing.CronOrInterval = _schedule.CronOrInterval;
+            existing.Enabled = _schedule.Enabled;
+        }
+        await ScheduleRepo.ReplaceUpdateSchedulesAsync(schedules);
+        _scheduleMessage = "Schedule saved.";
+    }
+
+    private async Task SaveInstructionAsync()
+    {
+        _savingInstruction = true;
+        _instructionMessage = null;
+        try
+        {
+            var instructions = await InstructionRepo.GetAllAsync();
+            var gmail = instructions.FirstOrDefault(x => x.Source == ContextSource.Gmail);
+            if (gmail is null)
+            {
+                gmail = new Instruction { Source = ContextSource.Gmail, Content = _instructionContent };
+                instructions.Add(gmail);
+            }
+            else
+            {
+                gmail.Content = _instructionContent;
+            }
+            await InstructionRepo.ReplaceAllAsync(instructions);
+            _instructionMessage = "Instructions saved.";
+        }
+        finally
+        {
+            _savingInstruction = false;
+        }
+    }
+}

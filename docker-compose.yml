@@ -32,11 +32,16 @@ services:
       - GMAIL_DAYS_BACK_DEFAULT=${GMAIL_DAYS_BACK_DEFAULT}
       - GMAIL_MAX_MESSAGES_DEFAULT=${GMAIL_MAX_MESSAGES_DEFAULT}
       - UNSPLASH_ACCESS_KEY=${UNSPLASH_ACCESS_KEY}
+      # Obsidian daily notes (synced via rsync to host path, mounted read-only)
+      - OBSIDIAN_VAULT_PATH=${OBSIDIAN_VAULT_PATH:-/var/notes}
+      - OBSIDIAN_DAILY_NOTES_PATTERN=${OBSIDIAN_DAILY_NOTES_PATTERN:-04 archive/journal/daily journal/*.md}
+      - OBSIDIAN_LOOKBACK_DAYS=${OBSIDIAN_LOOKBACK_DAYS:-30}
       - Database__SqlitePath=/data/butler.db
     ports:
       - "8080:8080"
     volumes:
       - butler-data:/data
+      - ${OBSIDIAN_HOST_PATH:-/var/notes}:${OBSIDIAN_VAULT_PATH:-/var/notes}:ro  # Obsidian vault (read-only)
     # Workaround: on some hosts, user-defined compose bridge networks can lose NAT/masquerade rules.
     # Using Docker's default `bridge` network restores outbound HTTPS (needed for Telegram/OpenAI/etc.).
     network_mode: bridge

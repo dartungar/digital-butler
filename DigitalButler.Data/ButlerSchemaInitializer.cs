@@ -99,6 +99,82 @@ public sealed class ButlerSchemaInitializer
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS ObsidianDailyNotes (
+                Date TEXT NOT NULL PRIMARY KEY,
+                LifeSatisfaction INTEGER NULL,
+                SelfEsteem INTEGER NULL,
+                Presence INTEGER NULL,
+                Energy INTEGER NULL,
+                Motivation INTEGER NULL,
+                Optimism INTEGER NULL,
+                Stress INTEGER NULL,
+                Irritability INTEGER NULL,
+                Obsession INTEGER NULL,
+                OfflineTime INTEGER NULL,
+                MeditationMinutes INTEGER NULL,
+                Weight REAL NULL,
+                SoulCount INTEGER NULL,
+                SoulItems TEXT NULL,
+                BodyCount INTEGER NULL,
+                BodyItems TEXT NULL,
+                AreasCount INTEGER NULL,
+                AreasItems TEXT NULL,
+                LifeCount INTEGER NULL,
+                LifeItems TEXT NULL,
+                IndulgingCount INTEGER NULL,
+                IndulgingItems TEXT NULL,
+                WeatherItems TEXT NULL,
+                CompletedTasks TEXT NULL,
+                PendingTasks TEXT NULL,
+                Notes TEXT NULL,
+                Tags TEXT NULL,
+                FilePath TEXT NOT NULL,
+                FileModifiedAt TEXT NULL,
+                CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ContextUpdateLog (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Timestamp TEXT NOT NULL,
+                Source TEXT NOT NULL,
+                Status TEXT NOT NULL,
+                ItemsScanned INTEGER NOT NULL,
+                ItemsAdded INTEGER NOT NULL,
+                ItemsUpdated INTEGER NOT NULL,
+                ItemsUnchanged INTEGER NOT NULL,
+                DurationMs INTEGER NOT NULL,
+                Message TEXT NULL,
+                Details TEXT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ObsidianWeeklySummaries (
+                WeekStart TEXT NOT NULL PRIMARY KEY,
+                AvgLifeSatisfaction REAL NULL,
+                AvgSelfEsteem REAL NULL,
+                AvgPresence REAL NULL,
+                AvgEnergy REAL NULL,
+                AvgMotivation REAL NULL,
+                AvgOptimism REAL NULL,
+                AvgStress REAL NULL,
+                AvgIrritability REAL NULL,
+                AvgObsession REAL NULL,
+                AvgOfflineTime REAL NULL,
+                TotalMeditationMinutes INTEGER NULL,
+                TotalSoulCount INTEGER NULL,
+                TotalBodyCount INTEGER NULL,
+                TotalAreasCount INTEGER NULL,
+                TotalLifeCount INTEGER NULL,
+                TotalIndulgingCount INTEGER NULL,
+                TotalCompletedTasks INTEGER NULL,
+                TotalPendingTasks INTEGER NULL,
+                DaysWithData INTEGER NOT NULL,
+                Summary TEXT NULL,
+                TopTags TEXT NULL,
+                CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL
+            );
             """
         );
 
@@ -152,6 +228,10 @@ public sealed class ButlerSchemaInitializer
             CREATE UNIQUE INDEX IF NOT EXISTS IX_GoogleCalendarFeeds_Url ON GoogleCalendarFeeds (Url);
             CREATE UNIQUE INDEX IF NOT EXISTS IX_SkillInstructions_Skill ON SkillInstructions (Skill);
             CREATE UNIQUE INDEX IF NOT EXISTS IX_GoogleOAuthTokens_UserId ON GoogleOAuthTokens (UserId);
+            CREATE INDEX IF NOT EXISTS IX_ObsidianDailyNotes_Date ON ObsidianDailyNotes (Date DESC);
+            CREATE INDEX IF NOT EXISTS IX_ContextUpdateLog_Timestamp ON ContextUpdateLog (Timestamp DESC);
+            CREATE INDEX IF NOT EXISTS IX_ContextUpdateLog_Source ON ContextUpdateLog (Source);
+            CREATE INDEX IF NOT EXISTS IX_ObsidianWeeklySummaries_WeekStart ON ObsidianWeeklySummaries (WeekStart DESC);
             """
         );
     }

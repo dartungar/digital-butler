@@ -22,6 +22,7 @@ public sealed class ContextUpdaterRegistry : IContextUpdaterRegistry
     public ContextUpdaterRegistry(
         GoogleCalendarContextSource googleCalendarSource,
         GmailContextSource gmailSource,
+        ObsidianDailyNotesContextSource obsidianSource,
         ContextRepository contextRepository,
         ILogger<ContextUpdater> logger)
     {
@@ -29,6 +30,7 @@ public sealed class ContextUpdaterRegistry : IContextUpdaterRegistry
         {
             [ContextSource.GoogleCalendar] = new ContextUpdater(googleCalendarSource, contextRepository, logger),
             [ContextSource.Gmail] = new ContextUpdater(gmailSource, contextRepository, logger),
+            [ContextSource.Obsidian] = new ContextUpdater(obsidianSource, contextRepository, logger),
         };
     }
 

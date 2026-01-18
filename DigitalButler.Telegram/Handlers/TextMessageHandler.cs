@@ -365,9 +365,14 @@ public sealed class TextMessageHandler : ITextMessageHandler
                 var eventText = CalendarEventSkillExecutor.TryExtractEventText(text) ?? text;
                 await HandleAddEventAsync(bot, chatId, eventText, ct);
                 break;
-            case ButlerSkill.Summary:
+            case ButlerSkill.DailySummary:
+                await HandleSummaryAsync(bot, chatId, weekly: false, ct);
+                break;
+            case ButlerSkill.WeeklySummary:
+                await HandleSummaryAsync(bot, chatId, weekly: true, ct);
+                break;
             default:
-                await HandleSummaryAsync(bot, chatId, route.PreferWeeklySummary, ct);
+                await HandleSummaryAsync(bot, chatId, weekly: false, ct);
                 break;
         }
     }

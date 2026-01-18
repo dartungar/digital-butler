@@ -48,4 +48,47 @@ public sealed class ManualSyncRunner : IManualSyncRunner
             _mutex.Release();
         }
     }
+
+    public async Task<ManualSyncResult> RunSourceAsync(ContextSource source, CancellationToken ct = default)
+    {
+        var startedAt = DateTimeOffset.UtcNow;
+        await _mutex.WaitAsync(ct);
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var registry = scope.ServiceProvider.GetRequiredService<IContextUpdaterRegistry>();
+            var updater = registry.GetUpdater(source);
+
+            var messages = new List<string>();
+            var failures = 0;
+            var updatersRun = 0;
+
+            if (updater is null)
+            {
+                messages.Add($"{source}: not registered");
+                failures = 1;
+            }
+            else
+            {
+                updatersRun = 1;
+                try
+                {
+                    await updater.UpdateAsync(ct);
+                    messages.Add($"{source}: ok");
+                }
+                catch (Exception ex)
+                {
+                    failures++;
+                    messages.Add($"{source}: failed ({ex.GetType().Name}: {ex.Message})");
+                }
+            }
+
+            var finishedAt = DateTimeOffset.UtcNow;
+            return new ManualSyncResult(startedAt, finishedAt, updatersRun, failures, messages);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
 }

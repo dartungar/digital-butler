@@ -33,6 +33,7 @@ DigitalButler.Web (entry point)
 - **GoogleCalendarContextSource** - Parses iCal feeds via Ical.Net
 - **GmailContextSource** - Fetches emails via MailKit
 - **PersonalContextSource** - User-added notes via Telegram/UI
+- **ObsidianDailyNotesContextSource** - Parses daily notes from synced Obsidian vault (YAML frontmatter + markdown)
 
 ### Skills (`DigitalButler.Skills`)
 - **OpenAiSkillRouter** - Classifies user messages into skills using OpenAI Responses API
@@ -67,7 +68,7 @@ DigitalButler.Web (entry point)
 
 - **SQLite** with Dapper ORM
 - Schema auto-initialized on startup (`ButlerSchemaInitializer`)
-- Tables: `ContextItems`, `Instructions`, `SkillInstructions`, `Schedules`, `SummarySchedules`, `AiTaskSettings`, `GoogleCalendarFeeds`, `GoogleOAuthTokens`, `AppSettings`
+- Tables: `ContextItems`, `Instructions`, `SkillInstructions`, `Schedules`, `SummarySchedules`, `AiTaskSettings`, `GoogleCalendarFeeds`, `GoogleOAuthTokens`, `AppSettings`, `ObsidianDailyNotes`, `ObsidianWeeklySummaries`, `ContextUpdateLog`
 
 ## AI Integration
 
@@ -88,6 +89,9 @@ GCAL_FEED*_NAME, GCAL_FEED*_URL           # iCal feeds
 GMAIL_ACCOUNTS                             # Email accounts
 GOOGLE_SERVICE_ACCOUNT_JSON                # Calendar event creation
 UNSPLASH_ACCESS_KEY                        # Drawing references
+OBSIDIAN_VAULT_PATH                        # Path to synced vault (default: /var/notes)
+OBSIDIAN_DAILY_NOTES_PATTERN               # Glob pattern (default: 04 archive/journal/daily notes/*.md)
+OBSIDIAN_LOOKBACK_DAYS                     # Days to scan (default: 30)
 Database__SqlitePath                       # SQLite path (default: data/butler.db)
 ```
 

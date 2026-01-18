@@ -111,12 +111,19 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
                         cancellationToken: ct);
                     break;
 
-                case ButlerSkill.Summary:
-                    await SendWithKeyboardAsync(bot, chatId, $"Transcribed: \"{transcribedText}\"\n\nGenerating summary...", ct);
-                    var taskName = route.PreferWeeklySummary ? "on-demand-weekly" : "on-demand-daily";
-                    var summary = await _summaryExecutor.ExecuteAsync(route.PreferWeeklySummary, taskName, ct);
-                    await bot.SendTextMessageAsync(chatId, TruncateForTelegram(summary ?? "No summary available."),
-                        replyMarkup: KeyboardFactory.BuildSummaryRefreshKeyboard(route.PreferWeeklySummary),
+                case ButlerSkill.DailySummary:
+                    await SendWithKeyboardAsync(bot, chatId, $"Transcribed: \"{transcribedText}\"\n\nGenerating daily summary...", ct);
+                    var dailySummary = await _summaryExecutor.ExecuteAsync(weekly: false, "on-demand-daily", ct);
+                    await bot.SendTextMessageAsync(chatId, TruncateForTelegram(dailySummary ?? "No summary available."),
+                        replyMarkup: KeyboardFactory.BuildSummaryRefreshKeyboard(false),
+                        cancellationToken: ct);
+                    break;
+
+                case ButlerSkill.WeeklySummary:
+                    await SendWithKeyboardAsync(bot, chatId, $"Transcribed: \"{transcribedText}\"\n\nGenerating weekly summary...", ct);
+                    var weeklySummary = await _summaryExecutor.ExecuteAsync(weekly: true, "on-demand-weekly", ct);
+                    await bot.SendTextMessageAsync(chatId, TruncateForTelegram(weeklySummary ?? "No summary available."),
+                        replyMarkup: KeyboardFactory.BuildSummaryRefreshKeyboard(true),
                         cancellationToken: ct);
                     break;
 

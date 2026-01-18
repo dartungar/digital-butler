@@ -113,11 +113,17 @@ public sealed class PhotoMessageHandler : IPhotoMessageHandler
                         cancellationToken: ct);
                     break;
 
-                case ButlerSkill.Summary:
-                    var taskName = route.PreferWeeklySummary ? "on-demand-weekly" : "on-demand-daily";
-                    var summary = await _summaryExecutor.ExecuteAsync(route.PreferWeeklySummary, taskName, ct);
-                    await bot.SendTextMessageAsync(chatId, TruncateForTelegram(summary ?? "No summary available."),
-                        replyMarkup: KeyboardFactory.BuildSummaryRefreshKeyboard(route.PreferWeeklySummary),
+                case ButlerSkill.DailySummary:
+                    var dailySummary = await _summaryExecutor.ExecuteAsync(weekly: false, "on-demand-daily", ct);
+                    await bot.SendTextMessageAsync(chatId, TruncateForTelegram(dailySummary ?? "No summary available."),
+                        replyMarkup: KeyboardFactory.BuildSummaryRefreshKeyboard(false),
+                        cancellationToken: ct);
+                    break;
+
+                case ButlerSkill.WeeklySummary:
+                    var weeklySummary = await _summaryExecutor.ExecuteAsync(weekly: true, "on-demand-weekly", ct);
+                    await bot.SendTextMessageAsync(chatId, TruncateForTelegram(weeklySummary ?? "No summary available."),
+                        replyMarkup: KeyboardFactory.BuildSummaryRefreshKeyboard(true),
                         cancellationToken: ct);
                     break;
 

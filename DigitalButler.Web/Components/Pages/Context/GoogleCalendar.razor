@@ -1,0 +1,228 @@
+@page "/context/google-calendar"
+@using DigitalButler.Common
+@inject DigitalButler.Data.Repositories.GoogleCalendarFeedRepository FeedRepo
+@inject DigitalButler.Data.Repositories.InstructionRepository InstructionRepo
+@inject DigitalButler.Data.Repositories.ScheduleRepository ScheduleRepo
+
+<PageTitle>Google Calendar</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">Google Calendar</h3>
+    <p class="subtitle is-6">Configure iCal feeds, sync schedule, and summarization instructions.</p>
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">iCal Feeds</h5>
+        <p class="subtitle is-6">Add one iCal feed per account/calendar.</p>
+    </div>
+
+    @if (_feeds is null)
+    {
+        <p>Loading...</p>
+    }
+    else
+    {
+        <EditForm Model="this" OnValidSubmit="SaveFeedsAsync">
+            <div class="table-container">
+                <table class="table is-fullwidth is-striped">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>iCal URL</th>
+                            <th>Enabled</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var feed in _feeds)
+                        {
+                            <tr>
+                                <td style="min-width: 220px;">
+                                    <InputText class="input" @bind-Value="feed.Name" />
+                                </td>
+                                <td>
+                                    <InputText class="input" @bind-Value="feed.Url" />
+                                </td>
+                                <td style="width: 90px;">
+                                    <label class="checkbox">
+                                        <InputCheckbox @bind-Value="feed.Enabled" />
+                                    </label>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="buttons">
+                <button class="button is-primary" type="submit">Save Feeds</button>
+                <button class="button" type="button" @onclick="AddRow">Add Feed</button>
+            </div>
+        </EditForm>
+
+        @if (!string.IsNullOrWhiteSpace(_feedsMessage))
+        {
+            <div class="notification is-info is-light">@_feedsMessage</div>
+        }
+    }
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Sync Schedule</h5>
+        <p class="subtitle is-6">How often to fetch calendar events.</p>
+    </div>
+
+    @if (_schedule is not null)
+    {
+        <EditForm Model="this" OnValidSubmit="SaveScheduleAsync">
+            <div class="columns">
+                <div class="column is-one-third">
+                    <div class="field">
+                        <label class="label">Cron Expression</label>
+                        <div class="control">
+                            <InputText class="input" @bind-Value="_schedule.CronOrInterval" />
+                        </div>
+                        <p class="help">Default: <code>0 */1 * * *</code> (hourly)</p>
+                    </div>
+                </div>
+                <div class="column">
+                    <div class="field">
+                        <label class="label">Enabled</label>
+                        <div class="control">
+                            <label class="checkbox">
+                                <InputCheckbox @bind-Value="_schedule.Enabled" />
+                                Sync enabled
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="buttons">
+                <button class="button is-primary" type="submit">Save Schedule</button>
+            </div>
+        </EditForm>
+
+        @if (!string.IsNullOrWhiteSpace(_scheduleMessage))
+        {
+            <div class="notification is-info is-light">@_scheduleMessage</div>
+        }
+    }
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Summarization Instructions</h5>
+        <p class="subtitle is-6">Guide how calendar events are summarized by AI.</p>
+    </div>
+
+    <EditForm Model="this" OnValidSubmit="SaveInstructionAsync">
+        <div class="field">
+            <div class="control">
+                <InputTextArea class="textarea" style="min-height: 120px;" @bind-Value="_instructionContent"
+                    placeholder="Instructions for summarizing calendar events..." />
+            </div>
+        </div>
+        <div class="buttons">
+            <button class="button is-primary" type="submit" disabled="@_savingInstruction">Save Instructions</button>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_instructionMessage))
+        {
+            <div class="notification is-info is-light">@_instructionMessage</div>
+        }
+    </EditForm>
+</div>
+
+@code {
+    private List<GoogleCalendarFeed>? _feeds;
+    private string? _feedsMessage;
+
+    private ScheduleConfig? _schedule;
+    private string? _scheduleMessage;
+
+    private string _instructionContent = string.Empty;
+    private bool _savingInstruction;
+    private string? _instructionMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _feeds = await FeedRepo.GetAllAsync();
+        if (_feeds.Count == 0)
+        {
+            _feeds.Add(new GoogleCalendarFeed { Name = "Primary", Url = string.Empty, Enabled = true });
+        }
+
+        var schedules = await ScheduleRepo.GetAllUpdateSchedulesAsync();
+        _schedule = schedules.FirstOrDefault(x => x.Source == ContextSource.GoogleCalendar);
+        if (_schedule is null)
+        {
+            _schedule = new ScheduleConfig { Source = ContextSource.GoogleCalendar, CronOrInterval = "0 */1 * * *", Enabled = true };
+        }
+
+        var instructions = await InstructionRepo.GetAllAsync();
+        var gcal = instructions.FirstOrDefault(x => x.Source == ContextSource.GoogleCalendar);
+        _instructionContent = gcal?.Content ?? string.Empty;
+    }
+
+    private void AddRow()
+    {
+        _feeds ??= new List<GoogleCalendarFeed>();
+        _feeds.Add(new GoogleCalendarFeed { Name = "New feed", Url = string.Empty, Enabled = true });
+    }
+
+    private async Task SaveFeedsAsync()
+    {
+        if (_feeds is null) return;
+        await FeedRepo.ReplaceAllAsync(_feeds);
+        _feeds = await FeedRepo.GetAllAsync();
+        if (_feeds.Count == 0)
+        {
+            _feeds.Add(new GoogleCalendarFeed { Name = "Primary", Url = string.Empty, Enabled = true });
+        }
+        _feedsMessage = "Feeds saved.";
+    }
+
+    private async Task SaveScheduleAsync()
+    {
+        if (_schedule is null) return;
+        var schedules = await ScheduleRepo.GetAllUpdateSchedulesAsync();
+        var existing = schedules.FirstOrDefault(x => x.Source == ContextSource.GoogleCalendar);
+        if (existing is null)
+        {
+            schedules.Add(_schedule);
+        }
+        else
+        {
+            existing.CronOrInterval = _schedule.CronOrInterval;
+            existing.Enabled = _schedule.Enabled;
+        }
+        await ScheduleRepo.ReplaceUpdateSchedulesAsync(schedules);
+        _scheduleMessage = "Schedule saved.";
+    }
+
+    private async Task SaveInstructionAsync()
+    {
+        _savingInstruction = true;
+        _instructionMessage = null;
+        try
+        {
+            var instructions = await InstructionRepo.GetAllAsync();
+            var gcal = instructions.FirstOrDefault(x => x.Source == ContextSource.GoogleCalendar);
+            if (gcal is null)
+            {
+                gcal = new Instruction { Source = ContextSource.GoogleCalendar, Content = _instructionContent };
+                instructions.Add(gcal);
+            }
+            else
+            {
+                gcal.Content = _instructionContent;
+            }
+            await InstructionRepo.ReplaceAllAsync(instructions);
+            _instructionMessage = "Instructions saved.";
+        }
+        finally
+        {
+            _savingInstruction = false;
+        }
+    }
+}

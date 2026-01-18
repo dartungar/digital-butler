@@ -1,0 +1,282 @@
+@page "/skills/weekly-summary"
+@using DigitalButler.Common
+@using DigitalButler.Context
+@inject DigitalButler.Data.Repositories.SkillInstructionRepository SkillRepo
+@inject DigitalButler.Data.Repositories.AiTaskSettingRepository AiSettingsRepo
+@inject DigitalButler.Data.Repositories.ScheduleRepository ScheduleRepo
+@inject TimeZoneService TimeZoneService
+
+<PageTitle>Weekly Summary</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">Weekly Summary</h3>
+    <p class="subtitle is-6">Configure the weekly summary skill.</p>
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Skill Instructions</h5>
+        <p class="subtitle is-6">Custom instructions to guide the AI when generating weekly summaries.</p>
+    </div>
+
+    @if (_skillConfig is null)
+    {
+        <p>Loading...</p>
+    }
+    else
+    {
+        <EditForm Model="this" OnValidSubmit="SaveSkillAsync">
+            <div class="field">
+                <label class="label">Instructions</label>
+                <div class="control">
+                    <InputTextArea class="textarea" style="min-height: 150px;" @bind-Value="_skillConfig.Content"
+                        placeholder="Custom instructions for weekly summary generation..." />
+                </div>
+            </div>
+
+            <div class="field">
+                <label class="label">Context Sources</label>
+                <div class="control">
+                    @foreach (var source in Enum.GetValues<ContextSource>())
+                    {
+                        <label class="checkbox" style="display: block; margin-bottom: 0.5rem;">
+                            <input type="checkbox"
+                                   checked="@IsSourceEnabled(source)"
+                                   @onchange="(e) => SetSourceEnabled(source, (bool)(e.Value ?? false))" />
+                            @source
+                        </label>
+                    }
+                </div>
+            </div>
+
+            <div class="field">
+                <div class="control">
+                    <label class="checkbox">
+                        <InputCheckbox @bind-Value="_skillConfig.EnableAiContext" />
+                        Enable AI self-thought context
+                    </label>
+                </div>
+                <p class="help">When enabled, Butler generates an extra AI-driven "self thought" snippet as context.</p>
+            </div>
+
+            <div class="buttons">
+                <button class="button is-primary" type="submit">Save Skill Config</button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_skillMessage))
+            {
+                <div class="notification is-info is-light">@_skillMessage</div>
+            }
+        </EditForm>
+    }
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Schedule</h5>
+        <p class="subtitle is-6">When to send the weekly summary.</p>
+    </div>
+
+    @if (_schedule is not null)
+    {
+        <EditForm Model="this" OnValidSubmit="SaveScheduleAsync">
+            <div class="columns">
+                <div class="column is-one-third">
+                    <div class="field">
+                        <label class="label">Day of Week</label>
+                        <div class="control">
+                            <div class="select">
+                                <InputSelect @bind-Value="_schedule.DayOfWeek">
+                                    @foreach (var day in Enum.GetValues<DayOfWeek>())
+                                    {
+                                        <option value="@day">@day</option>
+                                    }
+                                </InputSelect>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="column is-one-third">
+                    <div class="field">
+                        <label class="label">Time</label>
+                        <div class="control">
+                            <input type="time" class="input" value="@_schedule.Time.ToString("HH:mm")"
+                                   @onchange="@(e => UpdateTime(e.Value?.ToString()))" />
+                        </div>
+                    </div>
+                </div>
+                <div class="column">
+                    <div class="field">
+                        <label class="label">Enabled</label>
+                        <div class="control">
+                            <label class="checkbox">
+                                <InputCheckbox @bind-Value="_schedule.Enabled" />
+                                Schedule enabled
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="buttons">
+                <button class="button is-primary" type="submit">Save Schedule</button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_scheduleMessage))
+            {
+                <div class="notification is-info is-light">@_scheduleMessage</div>
+            }
+        </EditForm>
+    }
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">AI Settings Override</h5>
+        <p class="subtitle is-6">Override default AI provider settings for weekly summaries.</p>
+    </div>
+
+    @if (_aiSettings is not null)
+    {
+        <EditForm Model="this" OnValidSubmit="SaveAiSettingsAsync">
+            <div class="columns">
+                <div class="column">
+                    <div class="field">
+                        <label class="label">Base URL</label>
+                        <div class="control">
+                            <InputText class="input" @bind-Value="_aiSettings.ProviderUrl" placeholder="(use default)" />
+                        </div>
+                    </div>
+                </div>
+                <div class="column">
+                    <div class="field">
+                        <label class="label">Model</label>
+                        <div class="control">
+                            <InputText class="input" @bind-Value="_aiSettings.Model" placeholder="(use default)" />
+                        </div>
+                    </div>
+                </div>
+                <div class="column">
+                    <div class="field">
+                        <label class="label">API Key</label>
+                        <div class="control">
+                            <InputText class="input" type="password" @bind-Value="_aiSettings.ApiKey" placeholder="(use default)" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="buttons">
+                <button class="button is-primary" type="submit">Save AI Settings</button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_aiMessage))
+            {
+                <div class="notification is-info is-light">@_aiMessage</div>
+            }
+        </EditForm>
+    }
+</div>
+
+@code {
+    private const ButlerSkill Skill = ButlerSkill.WeeklySummary;
+    private const string TaskName = "weekly-summary";
+
+    private SkillInstruction? _skillConfig;
+    private string? _skillMessage;
+
+    private SummarySchedule? _schedule;
+    private string? _scheduleMessage;
+
+    private AiTaskSetting? _aiSettings;
+    private string? _aiMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var skills = await SkillRepo.GetAllAsync();
+        _skillConfig = skills.FirstOrDefault(x => x.Skill == Skill);
+        if (_skillConfig is null)
+        {
+            _skillConfig = new SkillInstruction { Skill = Skill, Content = string.Empty, ContextSourcesMask = -1, EnableAiContext = false };
+        }
+        _skillConfig.ContextSourcesMask = SkillContextDefaults.ResolveSourcesMask(Skill, _skillConfig.ContextSourcesMask);
+
+        var schedules = await ScheduleRepo.GetAllSummarySchedulesAsync();
+        _schedule = schedules.FirstOrDefault(x => x.IsWeekly);
+        if (_schedule is null)
+        {
+            _schedule = new SummarySchedule { IsWeekly = true, DayOfWeek = DayOfWeek.Monday, Time = new TimeOnly(9, 0), Enabled = true };
+        }
+
+        var aiSettings = await AiSettingsRepo.GetAllAsync();
+        _aiSettings = aiSettings.FirstOrDefault(x => x.TaskName == TaskName);
+        if (_aiSettings is null)
+        {
+            _aiSettings = new AiTaskSetting { TaskName = TaskName };
+        }
+    }
+
+    private bool IsSourceEnabled(ContextSource source)
+    {
+        if (_skillConfig is null) return false;
+        var mask = SkillContextDefaults.ResolveSourcesMask(Skill, _skillConfig.ContextSourcesMask);
+        return ContextSourceMask.Contains(mask, source);
+    }
+
+    private void SetSourceEnabled(ContextSource source, bool enabled)
+    {
+        if (_skillConfig is null) return;
+        var mask = SkillContextDefaults.ResolveSourcesMask(Skill, _skillConfig.ContextSourcesMask);
+        var bit = ContextSourceMask.For(source);
+        _skillConfig.ContextSourcesMask = enabled ? (mask | bit) : (mask & ~bit);
+    }
+
+    private async Task SaveSkillAsync()
+    {
+        if (_skillConfig is null) return;
+        var skills = await SkillRepo.GetAllAsync();
+        var existing = skills.FirstOrDefault(x => x.Skill == Skill);
+        if (existing is null)
+        {
+            skills.Add(_skillConfig);
+        }
+        else
+        {
+            existing.Content = _skillConfig.Content;
+            existing.ContextSourcesMask = _skillConfig.ContextSourcesMask;
+            existing.EnableAiContext = _skillConfig.EnableAiContext;
+        }
+        await SkillRepo.ReplaceAllAsync(skills);
+        _skillMessage = "Saved.";
+    }
+
+    private void UpdateTime(string? timeString)
+    {
+        if (_schedule is null) return;
+        if (TimeOnly.TryParse(timeString, out var time))
+        {
+            _schedule.Time = time;
+        }
+    }
+
+    private async Task SaveScheduleAsync()
+    {
+        if (_schedule is null) return;
+        var schedules = await ScheduleRepo.GetAllSummarySchedulesAsync();
+        var existing = schedules.FirstOrDefault(x => x.IsWeekly);
+        if (existing is null)
+        {
+            schedules.Add(_schedule);
+        }
+        else
+        {
+            existing.Time = _schedule.Time;
+            existing.DayOfWeek = _schedule.DayOfWeek;
+            existing.Enabled = _schedule.Enabled;
+        }
+        await ScheduleRepo.ReplaceSummarySchedulesAsync(schedules);
+        _scheduleMessage = "Schedule saved.";
+    }
+
+    private async Task SaveAiSettingsAsync()
+    {
+        if (_aiSettings is null) return;
+        await AiSettingsRepo.UpsertManyAsync(new[] { _aiSettings });
+        _aiMessage = "AI settings saved.";
+    }
+}

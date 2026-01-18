@@ -1,4 +1,6 @@
-﻿<div class="top-row">
+@using Microsoft.AspNetCore.Components.Routing
+
+<div class="top-row">
     <a class="brand" href="">DigitalButler</a>
 </div>
 
@@ -9,13 +11,31 @@
         <p class="menu-label">Admin</p>
         <ul class="menu-list">
             <li><NavLink href="/" Match="NavLinkMatch.All" ActiveClass="is-active">Dashboard</NavLink></li>
-            <li><NavLink href="/context" ActiveClass="is-active">Context</NavLink></li>
-            <li><NavLink href="/instructions" ActiveClass="is-active">Instructions</NavLink></li>
-            <li><NavLink href="/skills" ActiveClass="is-active">Skills</NavLink></li>
-            <li><NavLink href="/schedules" ActiveClass="is-active">Schedules</NavLink></li>
+        </ul>
+
+        <p class="menu-label">Context</p>
+        <ul class="menu-list">
+            <li><NavLink href="/context/all" ActiveClass="is-active">All Context</NavLink></li>
+            <li><NavLink href="/context/sync" ActiveClass="is-active">Sync Logs</NavLink></li>
+            <li><NavLink href="/context/obsidian" ActiveClass="is-active">Daily Notes</NavLink></li>
+            <li><NavLink href="/context/personal" ActiveClass="is-active">Personal</NavLink></li>
+            <li><NavLink href="/context/google-calendar" ActiveClass="is-active">Google Calendar</NavLink></li>
+            <li><NavLink href="/context/gmail-settings" ActiveClass="is-active">Gmail</NavLink></li>
+        </ul>
+
+        <p class="menu-label">Skills</p>
+        <ul class="menu-list">
+            <li><NavLink href="/skills/daily-summary" ActiveClass="is-active">Daily Summary</NavLink></li>
+            <li><NavLink href="/skills/weekly-summary" ActiveClass="is-active">Weekly Summary</NavLink></li>
+            <li><NavLink href="/skills/motivation" ActiveClass="is-active">Motivation</NavLink></li>
+            <li><NavLink href="/skills/activities" ActiveClass="is-active">Activities</NavLink></li>
+            <li><NavLink href="/skills/drawing-reference" ActiveClass="is-active">Drawing Reference</NavLink></li>
+            <li><NavLink href="/skills/calendar-event" ActiveClass="is-active">Calendar Event</NavLink></li>
+        </ul>
+
+        <p class="menu-label">Settings</p>
+        <ul class="menu-list">
             <li><NavLink href="/ai-settings" ActiveClass="is-active">AI Settings</NavLink></li>
-            <li><NavLink href="/google-calendar" ActiveClass="is-active">Google Calendar</NavLink></li>
-            <li><NavLink href="/gmail" ActiveClass="is-active">Gmail</NavLink></li>
         </ul>
     </aside>
 </div>

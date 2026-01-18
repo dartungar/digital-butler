@@ -1,0 +1,195 @@
+@page "/context/obsidian"
+@inject ObsidianDailyNotesRepository NotesRepo
+
+@using DigitalButler.Data.Repositories
+
+<PageTitle>Obsidian Daily Notes</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">Obsidian Daily Notes</h3>
+    <p class="subtitle is-6">View synced daily notes from your Obsidian vault.</p>
+</div>
+
+@if (_notes is null)
+{
+    <p>Loading...</p>
+}
+else if (_notes.Count == 0)
+{
+    <div class="notification is-info is-light">
+        No daily notes synced yet. Go to <a href="/context/sync">Sync</a> to trigger Obsidian sync.
+    </div>
+}
+else
+{
+    <div class="box">
+        <div class="table-container">
+            <table class="table is-fullwidth is-striped is-hoverable is-narrow">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Mood</th>
+                        <th>Energy</th>
+                        <th>Motivation</th>
+                        <th>Stress</th>
+                        <th>Soul</th>
+                        <th>Body</th>
+                        <th>Indulging</th>
+                        <th>Tasks</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var note in _notes)
+                    {
+                        <tr @onclick="() => SelectNote(note)" style="cursor: pointer;" class="@(_selectedNote?.Date == note.Date ? "is-selected" : null)">
+                            <td style="white-space: nowrap;">@note.Date.ToString("yyyy-MM-dd")</td>
+                            <td>@(note.LifeSatisfaction?.ToString() ?? "-")</td>
+                            <td>@(note.Energy?.ToString() ?? "-")</td>
+                            <td>@(note.Motivation?.ToString() ?? "-")</td>
+                            <td>@(note.Stress?.ToString() ?? "-")</td>
+                            <td>@(note.SoulCount?.ToString() ?? "-")</td>
+                            <td>@(note.BodyCount?.ToString() ?? "-")</td>
+                            <td>@(note.IndulgingCount?.ToString() ?? "-")</td>
+                            <td>
+                                <span class="tag is-success is-light">@(note.CompletedTasks?.Count ?? 0)</span>
+                                <span class="tag is-warning is-light">@(note.PendingTasks?.Count ?? 0)</span>
+                            </td>
+                            <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
+                                @(string.IsNullOrWhiteSpace(note.Notes) ? "-" : TruncateText(note.Notes, 50))
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    @if (_selectedNote is not null)
+    {
+        <div class="box">
+            <div class="content">
+                <h4 class="title is-4">@_selectedNote.Date.ToString("yyyy-MM-dd")</h4>
+            </div>
+
+            <div class="columns">
+                <div class="column">
+                    <h6 class="title is-6">Metrics</h6>
+                    <table class="table is-narrow">
+                        <tbody>
+                            <tr><td>Life Satisfaction</td><td>@(_selectedNote.LifeSatisfaction?.ToString() ?? "-")</td></tr>
+                            <tr><td>Self Esteem</td><td>@(_selectedNote.SelfEsteem?.ToString() ?? "-")</td></tr>
+                            <tr><td>Presence</td><td>@(_selectedNote.Presence?.ToString() ?? "-")</td></tr>
+                            <tr><td>Energy</td><td>@(_selectedNote.Energy?.ToString() ?? "-")</td></tr>
+                            <tr><td>Motivation</td><td>@(_selectedNote.Motivation?.ToString() ?? "-")</td></tr>
+                            <tr><td>Optimism</td><td>@(_selectedNote.Optimism?.ToString() ?? "-")</td></tr>
+                            <tr><td>Stress</td><td>@(_selectedNote.Stress?.ToString() ?? "-")</td></tr>
+                            <tr><td>Irritability</td><td>@(_selectedNote.Irritability?.ToString() ?? "-")</td></tr>
+                            <tr><td>Obsession</td><td>@(_selectedNote.Obsession?.ToString() ?? "-")</td></tr>
+                            <tr><td>Offline Time</td><td>@(_selectedNote.OfflineTime?.ToString() ?? "-")</td></tr>
+                            <tr><td>Meditation</td><td>@(_selectedNote.MeditationMinutes?.ToString() ?? "-") min</td></tr>
+                            <tr><td>Weight</td><td>@(_selectedNote.Weight?.ToString("F1") ?? "-")</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="column">
+                    <h6 class="title is-6">Habits</h6>
+                    <table class="table is-narrow">
+                        <tbody>
+                            <tr><td>Soul</td><td>@(_selectedNote.SoulCount ?? 0) - @(string.Join(", ", _selectedNote.SoulItems ?? new()))</td></tr>
+                            <tr><td>Body</td><td>@(_selectedNote.BodyCount ?? 0) - @(string.Join(", ", _selectedNote.BodyItems ?? new()))</td></tr>
+                            <tr><td>Areas</td><td>@(_selectedNote.AreasCount ?? 0) - @(string.Join(", ", _selectedNote.AreasItems ?? new()))</td></tr>
+                            <tr><td>Life</td><td>@(_selectedNote.LifeCount ?? 0) - @(string.Join(", ", _selectedNote.LifeItems ?? new()))</td></tr>
+                            <tr><td>Indulging</td><td>@(_selectedNote.IndulgingCount ?? 0) - @(string.Join(", ", _selectedNote.IndulgingItems ?? new()))</td></tr>
+                            <tr><td>Weather</td><td>@(string.Join(", ", _selectedNote.WeatherItems ?? new()))</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="columns">
+                <div class="column">
+                    <h6 class="title is-6">Completed Tasks (@(_selectedNote.CompletedTasks?.Count ?? 0))</h6>
+                    @if (_selectedNote.CompletedTasks?.Count > 0)
+                    {
+                        <ul>
+                            @foreach (var task in _selectedNote.CompletedTasks)
+                            {
+                                <li>@task</li>
+                            }
+                        </ul>
+                    }
+                    else
+                    {
+                        <p class="has-text-grey">None</p>
+                    }
+                </div>
+
+                <div class="column">
+                    <h6 class="title is-6">Pending Tasks (@(_selectedNote.PendingTasks?.Count ?? 0))</h6>
+                    @if (_selectedNote.PendingTasks?.Count > 0)
+                    {
+                        <ul>
+                            @foreach (var task in _selectedNote.PendingTasks)
+                            {
+                                <li>@task</li>
+                            }
+                        </ul>
+                    }
+                    else
+                    {
+                        <p class="has-text-grey">None</p>
+                    }
+                </div>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_selectedNote.Notes))
+            {
+                <h6 class="title is-6">Journal Notes</h6>
+                <div class="content" style="white-space: pre-wrap; background: #f5f5f5; padding: 1rem; border-radius: 4px;">
+                    @_selectedNote.Notes
+                </div>
+            }
+
+            @if (_selectedNote.Tags?.Count > 0)
+            {
+                <h6 class="title is-6">Tags</h6>
+                <div class="tags">
+                    @foreach (var tag in _selectedNote.Tags)
+                    {
+                        <span class="tag is-info is-light">@tag</span>
+                    }
+                </div>
+            }
+
+            <p class="has-text-grey is-size-7 mt-4">
+                File: @_selectedNote.FilePath<br />
+                Modified: @_selectedNote.FileModifiedAt?.LocalDateTime.ToString("g")<br />
+                Synced: @_selectedNote.UpdatedAt.LocalDateTime.ToString("g")
+            </p>
+        </div>
+    }
+}
+
+@code {
+    private List<ObsidianDailyNote>? _notes;
+    private ObsidianDailyNote? _selectedNote;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _notes = await NotesRepo.GetRecentAsync(60);
+    }
+
+    private void SelectNote(ObsidianDailyNote note)
+    {
+        _selectedNote = _selectedNote?.Date == note.Date ? null : note;
+    }
+
+    private static string TruncateText(string text, int maxLength)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= maxLength)
+            return text;
+        return text[..maxLength] + "...";
+    }
+}

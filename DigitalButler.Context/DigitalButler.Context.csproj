@@ -19,6 +19,7 @@
         <PackageReference Include="MailKit" Version="4.10.0" />
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0-preview.3.25171.5" />
         <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.0-preview.3.25171.5" />
+        <PackageReference Include="YamlDotNet" Version="16.3.0" />
     </ItemGroup>
 
     <!-- EF migrations are no longer used after switching to Dapper. -->

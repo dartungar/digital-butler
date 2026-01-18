@@ -1,0 +1,84 @@
+@page "/skills/drawing-reference"
+@using DigitalButler.Common
+@inject DigitalButler.Data.Repositories.SkillInstructionRepository SkillRepo
+
+<PageTitle>Drawing Reference</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">Drawing Reference</h3>
+    <p class="subtitle is-6">Configure the drawing reference skill for finding reference images.</p>
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Skill Instructions</h5>
+        <p class="subtitle is-6">Custom instructions for finding drawing references.</p>
+    </div>
+
+    @if (_skillConfig is null)
+    {
+        <p>Loading...</p>
+    }
+    else
+    {
+        <EditForm Model="this" OnValidSubmit="SaveSkillAsync">
+            <div class="field">
+                <label class="label">Instructions</label>
+                <div class="control">
+                    <InputTextArea class="textarea" style="min-height: 150px;" @bind-Value="_skillConfig.Content"
+                        placeholder="Custom instructions for drawing reference searches..." />
+                </div>
+            </div>
+
+            <div class="buttons">
+                <button class="button is-primary" type="submit">Save Skill Config</button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_skillMessage))
+            {
+                <div class="notification is-info is-light">@_skillMessage</div>
+            }
+        </EditForm>
+    }
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Configuration</h5>
+        <p>Drawing references are fetched from Unsplash. Configure via environment variable:</p>
+        <pre><code>UNSPLASH_ACCESS_KEY=your_access_key</code></pre>
+    </div>
+</div>
+
+@code {
+    private const ButlerSkill Skill = ButlerSkill.DrawingReference;
+
+    private SkillInstruction? _skillConfig;
+    private string? _skillMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var skills = await SkillRepo.GetAllAsync();
+        _skillConfig = skills.FirstOrDefault(x => x.Skill == Skill);
+        if (_skillConfig is null)
+        {
+            _skillConfig = new SkillInstruction { Skill = Skill, Content = string.Empty, ContextSourcesMask = 0, EnableAiContext = false };
+        }
+    }
+
+    private async Task SaveSkillAsync()
+    {
+        if (_skillConfig is null) return;
+        var skills = await SkillRepo.GetAllAsync();
+        var existing = skills.FirstOrDefault(x => x.Skill == Skill);
+        if (existing is null)
+        {
+            skills.Add(_skillConfig);
+        }
+        else
+        {
+            existing.Content = _skillConfig.Content;
+        }
+        await SkillRepo.ReplaceAllAsync(skills);
+        _skillMessage = "Saved.";
+    }
+}
