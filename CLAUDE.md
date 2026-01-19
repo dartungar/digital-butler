@@ -2,7 +2,9 @@
 
 ## Project Overview
 
-Digital Butler is a personal AI assistant Telegram bot built with .NET 10.0. It aggregates information from multiple context sources (Google Calendar, Gmail, personal notes) and uses AI to provide daily summaries, motivational messages, and personalized recommendations.
+Digital Butler is a personal AI assistant Telegram bot built with .NET 10.0. 
+It is used STRICTLY by its creator (it has only 1 user - me).
+It aggregates information from multiple context sources (Google Calendar, Gmail, personal notes) and uses AI to provide daily summaries, motivational messages, and personalized recommendations.
 
 ## Solution Structure
 

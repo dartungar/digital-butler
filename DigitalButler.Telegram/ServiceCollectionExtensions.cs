@@ -1,3 +1,4 @@
+using DigitalButler.Common;
 using DigitalButler.Telegram.Handlers;
 using DigitalButler.Telegram.Skills;
 using DigitalButler.Telegram.State;
@@ -9,6 +10,9 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddTelegramBot(this IServiceCollection services)
     {
+        // Error notifier (singleton - shared across scheduler and handlers)
+        services.AddSingleton<ITelegramErrorNotifier, TelegramErrorNotifier>();
+
         // State management (singleton - shared across all handlers)
         services.AddSingleton<ConversationStateManager>();
 

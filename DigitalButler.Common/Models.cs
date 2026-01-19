@@ -282,6 +282,15 @@ public class ObsidianWeeklySummary
 }
 
 /// <summary>
+/// Service for sending error notifications to the user via Telegram.
+/// </summary>
+public interface ITelegramErrorNotifier
+{
+    Task NotifyErrorAsync(string context, Exception ex, CancellationToken ct = default);
+    Task NotifyErrorAsync(string context, string message, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Analysis result for daily/weekly summaries with comparison data.
 /// </summary>
 public class ObsidianAnalysisResult

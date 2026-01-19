@@ -1,3 +1,4 @@
+using DigitalButler.Common;
 using DigitalButler.Telegram.Handlers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -18,6 +19,7 @@ public class BotService : IHostedService, IDisposable
     private readonly string _token;
     private readonly TimeSpan _startupPingTimeout;
     private readonly bool _forceIpv4;
+    private readonly ITelegramErrorNotifier? _errorNotifier;
 
     private TelegramBotClient? _bot;
     private CancellationTokenSource? _cts;
@@ -26,10 +28,12 @@ public class BotService : IHostedService, IDisposable
     public BotService(
         ILogger<BotService> logger,
         IServiceProvider services,
-        IConfiguration config)
+        IConfiguration config,
+        ITelegramErrorNotifier? errorNotifier = null)
     {
         _logger = logger;
         _services = services;
+        _errorNotifier = errorNotifier;
 
         _token = config["TELEGRAM_BOT_TOKEN"] ?? throw new InvalidOperationException("TELEGRAM_BOT_TOKEN not configured");
 
@@ -231,12 +235,19 @@ public class BotService : IHostedService, IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unhandled error in update handler");
+            if (_errorNotifier != null)
+            {
+                await _errorNotifier.NotifyErrorAsync("Message handler", ex, ct);
+            }
         }
     }
 
-    private Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
+    private async Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
     {
         _logger.LogError(exception, "Telegram bot error");
-        return Task.CompletedTask;
+        if (_errorNotifier != null)
+        {
+            await _errorNotifier.NotifyErrorAsync("Telegram bot polling", exception, cancellationToken);
+        }
     }
 }

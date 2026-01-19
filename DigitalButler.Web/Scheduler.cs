@@ -12,17 +12,20 @@ public class SchedulerService : BackgroundService
     private readonly ILogger<SchedulerService> _logger;
     private readonly ITelegramBotClient? _bot;
     private readonly IConfiguration _config;
+    private readonly ITelegramErrorNotifier? _errorNotifier;
 
     public SchedulerService(
         IServiceProvider services,
         ILogger<SchedulerService> logger,
         IConfiguration config,
-        ITelegramBotClient? bot = null)
+        ITelegramBotClient? bot = null,
+        ITelegramErrorNotifier? errorNotifier = null)
     {
         _services = services;
         _logger = logger;
         _bot = bot;
         _config = config;
+        _errorNotifier = errorNotifier;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -43,6 +46,10 @@ public class SchedulerService : BackgroundService
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Scheduler tick failed");
+                    if (_errorNotifier != null)
+                    {
+                        await _errorNotifier.NotifyErrorAsync("Scheduler tick", ex, stoppingToken);
+                    }
                 }
                 await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
             }
@@ -87,6 +94,10 @@ public class SchedulerService : BackgroundService
                     catch (Exception ex)
                     {
                         _logger.LogWarning(ex, "Scheduled update for {Source} failed", schedule.Source);
+                        if (_errorNotifier != null)
+                        {
+                            await _errorNotifier.NotifyErrorAsync($"Sync: {schedule.Source}", ex, ct);
+                        }
                     }
                 }
             }
@@ -98,7 +109,18 @@ public class SchedulerService : BackgroundService
         {
             if (sched.Time.Hour == localNow.Hour && sched.Time.Minute == localNow.Minute)
             {
-                await SendSummaryAsync(scope.ServiceProvider, contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "daily-summary", chatId, ct);
+                try
+                {
+                    await SendSummaryAsync(scope.ServiceProvider, contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "daily-summary", chatId, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to send daily summary");
+                    if (_errorNotifier != null)
+                    {
+                        await _errorNotifier.NotifyErrorAsync("Daily summary", ex, ct);
+                    }
+                }
             }
         }
 
@@ -108,7 +130,18 @@ public class SchedulerService : BackgroundService
         {
             if (sched.DayOfWeek == localNow.DayOfWeek && sched.Time.Hour == localNow.Hour && sched.Time.Minute == localNow.Minute)
             {
-                await SendSummaryAsync(scope.ServiceProvider, contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "weekly-summary", chatId, ct);
+                try
+                {
+                    await SendSummaryAsync(scope.ServiceProvider, contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "weekly-summary", chatId, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to send weekly summary");
+                    if (_errorNotifier != null)
+                    {
+                        await _errorNotifier.NotifyErrorAsync("Weekly summary", ex, ct);
+                    }
+                }
             }
         }
     }
