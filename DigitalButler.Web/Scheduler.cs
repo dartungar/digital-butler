@@ -27,17 +27,30 @@ public class SchedulerService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
+            var chatId = _config["Telegram:ChatId"];
+            _logger.LogInformation("Scheduler starting. Bot: {BotStatus}, ChatId: {ChatIdStatus}",
+                _bot == null ? "not configured" : "configured",
+                string.IsNullOrWhiteSpace(chatId) ? "not set" : $"set ({chatId})");
+
+            while (!stoppingToken.IsCancellationRequested)
             {
-                await TickAsync(stoppingToken);
+                try
+                {
+                    await TickAsync(stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Scheduler tick failed");
+                }
+                await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Scheduler tick failed");
-            }
-            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Scheduler failed to start");
+            throw;
         }
     }
 
@@ -53,7 +66,7 @@ public class SchedulerService : BackgroundService
         var tzService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
         var tz = await tzService.GetTimeZoneInfoAsync(ct);
         var localNow = TimeZoneInfo.ConvertTime(nowUtc, tz);
-        var chatId = _config["TELEGRAM_CHAT_ID"] ?? _config["Telegram:ChatId"];
+        var chatId = _config["Telegram:ChatId"];
         var schedules = scope.ServiceProvider.GetRequiredService<ScheduleRepository>();
         var updaterRegistry = scope.ServiceProvider.GetRequiredService<IContextUpdaterRegistry>();
 
@@ -85,7 +98,7 @@ public class SchedulerService : BackgroundService
         {
             if (sched.Time.Hour == localNow.Hour && sched.Time.Minute == localNow.Minute)
             {
-                await SendSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "daily-summary", chatId, ct);
+                await SendSummaryAsync(scope.ServiceProvider, contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "daily-summary", chatId, ct);
             }
         }
 
@@ -95,7 +108,7 @@ public class SchedulerService : BackgroundService
         {
             if (sched.DayOfWeek == localNow.DayOfWeek && sched.Time.Hour == localNow.Hour && sched.Time.Minute == localNow.Minute)
             {
-                await SendSummaryAsync(contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "weekly-summary", chatId, ct);
+                await SendSummaryAsync(scope.ServiceProvider, contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "weekly-summary", chatId, ct);
             }
         }
     }
@@ -125,7 +138,7 @@ public class SchedulerService : BackgroundService
         return 60;
     }
 
-    private async Task SendSummaryAsync(ContextService contextService, InstructionService instructionService, SkillInstructionService skillInstructionService, ISummarizationService summarizer, IAiContextAugmenter aiContext, TimeZoneInfo tz, string taskName, string? chatId, CancellationToken ct)
+    private async Task SendSummaryAsync(IServiceProvider serviceProvider, ContextService contextService, InstructionService instructionService, SkillInstructionService skillInstructionService, ISummarizationService summarizer, IAiContextAugmenter aiContext, TimeZoneInfo tz, string taskName, string? chatId, CancellationToken ct)
     {
         var (start, end) = taskName switch
         {
@@ -168,6 +181,33 @@ public class SchedulerService : BackgroundService
         if (_bot != null && !string.IsNullOrWhiteSpace(chatId))
         {
             await _bot.SendTextMessageAsync(chatId, summary, cancellationToken: ct);
+            _logger.LogInformation("Sent {TaskName} to chat {ChatId}", taskName, chatId);
+        }
+        else
+        {
+            _logger.LogWarning("Cannot send {TaskName}: bot is {BotStatus}, chatId is {ChatIdStatus}",
+                taskName,
+                _bot == null ? "null" : "available",
+                string.IsNullOrWhiteSpace(chatId) ? "missing" : "set");
+        }
+
+        // Store weekly summary for future comparisons
+        if (taskName == "weekly-summary")
+        {
+            try
+            {
+                var obsidianAnalysis = serviceProvider.GetRequiredService<IObsidianAnalysisService>();
+                var weeklyResult = await obsidianAnalysis.AnalyzeWeeklyAsync(tz, ct);
+                if (weeklyResult != null)
+                {
+                    await obsidianAnalysis.StoreWeeklySummaryAsync(weeklyResult, summary, ct);
+                    _logger.LogInformation("Stored weekly Obsidian summary for week starting {WeekStart}", weeklyResult.PeriodStart);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to store weekly Obsidian summary");
+            }
         }
     }
 }

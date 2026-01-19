@@ -47,44 +47,38 @@ public sealed class ObsidianAnalysisService : IObsidianAnalysisService
         var yesterday = today.AddDays(-1);
         var dayBeforeYesterday = today.AddDays(-2);
 
-        // Get current period (yesterday + today)
-        var currentNotes = await _dailyRepo.GetRangeAsync(yesterday, today, ct);
-        if (currentNotes.Count == 0)
+        // Get current period (yesterday only) - excludes today's incomplete data
+        var yesterdayNote = await _dailyRepo.GetByDateAsync(yesterday, ct);
+        if (yesterdayNote == null)
             return null;
 
-        // Get comparison periods
-        var dayBeforeNote = await _dailyRepo.GetByDateAsync(dayBeforeYesterday, ct);
+        // Get comparison period (day before yesterday)
+        var dayBeforeYesterdayNote = await _dailyRepo.GetByDateAsync(dayBeforeYesterday, ct);
 
-        // This week (Mon to today)
-        var thisWeekStart = GetMondayOfWeek(today);
-        var thisWeekNotes = await _dailyRepo.GetRangeAsync(thisWeekStart, today, ct);
-
-        // Last week
-        var lastWeekStart = thisWeekStart.AddDays(-7);
-        var lastWeekEnd = thisWeekStart.AddDays(-1);
-        var lastWeekNotes = await _dailyRepo.GetRangeAsync(lastWeekStart, lastWeekEnd, ct);
-
-        // Build current period result
-        var result = BuildAnalysisResult(currentNotes, yesterday, today, isWeekly: false);
+        // Build current period result from yesterday's note
+        var result = BuildAnalysisResult(new List<ObsidianDailyNote> { yesterdayNote }, yesterday, yesterday, isWeekly: false);
 
         // Calculate comparison vs day before yesterday
-        if (dayBeforeNote != null)
+        if (dayBeforeYesterdayNote != null)
         {
-            result.EnergyDelta = ComputeDelta(result.AvgEnergy, dayBeforeNote.Energy);
-            result.MotivationDelta = ComputeDelta(result.AvgMotivation, dayBeforeNote.Motivation);
-            result.StressDelta = ComputeDelta(result.AvgStress, dayBeforeNote.Stress);
-            result.LifeSatisfactionDelta = ComputeDelta(result.AvgLifeSatisfaction, dayBeforeNote.LifeSatisfaction);
+            result.EnergyDelta = ComputeDelta(result.AvgEnergy, dayBeforeYesterdayNote.Energy);
+            result.MotivationDelta = ComputeDelta(result.AvgMotivation, dayBeforeYesterdayNote.Motivation);
+            result.StressDelta = ComputeDelta(result.AvgStress, dayBeforeYesterdayNote.Stress);
+            result.LifeSatisfactionDelta = ComputeDelta(result.AvgLifeSatisfaction, dayBeforeYesterdayNote.LifeSatisfaction);
             result.ComparisonPeriodLabel = "day before yesterday";
         }
-        else if (lastWeekNotes.Count > 0)
+        else
         {
-            // Fall back to last week average
-            var lastWeekAvg = BuildAnalysisResult(lastWeekNotes, lastWeekStart, lastWeekEnd, isWeekly: true);
-            result.EnergyDelta = ComputeDelta(result.AvgEnergy, lastWeekAvg.AvgEnergy);
-            result.MotivationDelta = ComputeDelta(result.AvgMotivation, lastWeekAvg.AvgMotivation);
-            result.StressDelta = ComputeDelta(result.AvgStress, lastWeekAvg.AvgStress);
-            result.LifeSatisfactionDelta = ComputeDelta(result.AvgLifeSatisfaction, lastWeekAvg.AvgLifeSatisfaction);
-            result.ComparisonPeriodLabel = "last week avg";
+            // Fall back to stored last week summary
+            var lastWeekSummary = await GetLastWeekSummaryAsync(today, ct);
+            if (lastWeekSummary != null)
+            {
+                result.EnergyDelta = ComputeDelta(result.AvgEnergy, lastWeekSummary.AvgEnergy);
+                result.MotivationDelta = ComputeDelta(result.AvgMotivation, lastWeekSummary.AvgMotivation);
+                result.StressDelta = ComputeDelta(result.AvgStress, lastWeekSummary.AvgStress);
+                result.LifeSatisfactionDelta = ComputeDelta(result.AvgLifeSatisfaction, lastWeekSummary.AvgLifeSatisfaction);
+                result.ComparisonPeriodLabel = "last week avg";
+            }
         }
 
         return result;
@@ -362,5 +356,12 @@ public sealed class ObsidianAnalysisService : IObsidianAnalysisService
     {
         var daysFromMonday = ((int)date.DayOfWeek - 1 + 7) % 7;
         return date.AddDays(-daysFromMonday);
+    }
+
+    private async Task<ObsidianWeeklySummary?> GetLastWeekSummaryAsync(DateOnly today, CancellationToken ct)
+    {
+        var thisWeekStart = GetMondayOfWeek(today);
+        var lastWeekStart = thisWeekStart.AddDays(-7);
+        return await _weeklyRepo.GetByWeekStartAsync(lastWeekStart, ct);
     }
 }
