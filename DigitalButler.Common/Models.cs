@@ -65,6 +65,40 @@ public enum ButlerSkill
     VaultSearch = 6      // Search Obsidian vault
 }
 
+/// <summary>
+/// Task status based on Obsidian checkbox markers.
+/// </summary>
+public enum ObsidianTaskStatus
+{
+    Pending,           // [ ] - unchecked
+    Completed,         // [x] or [X] - completed
+    InQuestion,        // [?] - uncertain/needs clarification
+    PartiallyComplete, // [/] - partially done
+    Rescheduled,       // [>] - moved to another day
+    Cancelled,         // [-] - cancelled/won't do
+    Starred,           // [*] - starred/important
+    Attention,         // [!] - needs attention
+    Information,       // [i] - informational
+    Idea               // [I] - idea
+}
+
+/// <summary>
+/// Represents a task from Obsidian daily notes with its status.
+/// </summary>
+public class ObsidianTask
+{
+    public string Text { get; set; } = string.Empty;
+    public ObsidianTaskStatus Status { get; set; }
+
+    public ObsidianTask() { }
+
+    public ObsidianTask(string text, ObsidianTaskStatus status)
+    {
+        Text = text;
+        Status = status;
+    }
+}
+
 public class SkillInstruction
 {
     public Guid Id { get; set; }
@@ -206,9 +240,17 @@ public class ObsidianDailyNote
     public List<string>? IndulgingItems { get; set; }
     public List<string>? WeatherItems { get; set; }
 
-    // Tasks
+    // Tasks - categorized by status
     public List<string>? CompletedTasks { get; set; }
     public List<string>? PendingTasks { get; set; }
+    public List<string>? InQuestionTasks { get; set; }
+    public List<string>? PartiallyCompleteTasks { get; set; }
+    public List<string>? RescheduledTasks { get; set; }
+    public List<string>? CancelledTasks { get; set; }
+    public List<string>? StarredTasks { get; set; }
+    public List<string>? AttentionTasks { get; set; }
+    public List<string>? InformationTasks { get; set; }
+    public List<string>? IdeaTasks { get; set; }
 
     // Content
     public string? Notes { get; set; }
@@ -315,13 +357,29 @@ public class ObsidianAnalysisResult
     public int TotalIndulgingCount { get; set; }
     public int TotalMeditationMinutes { get; set; }
 
-    // Tasks
+    // Tasks - with all status categories
     public int TotalCompletedTasks { get; set; }
     public int TotalPendingTasks { get; set; }
+    public int TotalInQuestionTasks { get; set; }
+    public int TotalPartiallyCompleteTasks { get; set; }
+    public int TotalRescheduledTasks { get; set; }
+    public int TotalCancelledTasks { get; set; }
+    public int TotalStarredTasks { get; set; }
+    public int TotalAttentionTasks { get; set; }
+    public int TotalInformationTasks { get; set; }
+    public int TotalIdeaTasks { get; set; }
 
     // Content
     public List<string> CompletedTasksList { get; set; } = new();
     public List<string> PendingTasksList { get; set; } = new();
+    public List<string> InQuestionTasksList { get; set; } = new();
+    public List<string> PartiallyCompleteTasksList { get; set; } = new();
+    public List<string> RescheduledTasksList { get; set; } = new();
+    public List<string> CancelledTasksList { get; set; } = new();
+    public List<string> StarredTasksList { get; set; } = new();
+    public List<string> AttentionTasksList { get; set; } = new();
+    public List<string> InformationTasksList { get; set; } = new();
+    public List<string> IdeaTasksList { get; set; } = new();
     public List<string> JournalHighlights { get; set; } = new();
     public List<string> TopTags { get; set; } = new();
 

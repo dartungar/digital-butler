@@ -98,14 +98,18 @@ public sealed class ObsidianDailyNotesRepository
                 Stress, Irritability, Obsession, OfflineTime, MeditationMinutes, Weight,
                 SoulCount, SoulItems, BodyCount, BodyItems, AreasCount, AreasItems,
                 LifeCount, LifeItems, IndulgingCount, IndulgingItems, WeatherItems,
-                CompletedTasks, PendingTasks, Notes, Tags,
+                CompletedTasks, PendingTasks, InQuestionTasks, PartiallyCompleteTasks,
+                RescheduledTasks, CancelledTasks, StarredTasks, AttentionTasks,
+                InformationTasks, IdeaTasks, Notes, Tags,
                 FilePath, FileModifiedAt, CreatedAt, UpdatedAt
             ) VALUES (
                 @Date, @LifeSatisfaction, @SelfEsteem, @Presence, @Energy, @Motivation, @Optimism,
                 @Stress, @Irritability, @Obsession, @OfflineTime, @MeditationMinutes, @Weight,
                 @SoulCount, @SoulItems, @BodyCount, @BodyItems, @AreasCount, @AreasItems,
                 @LifeCount, @LifeItems, @IndulgingCount, @IndulgingItems, @WeatherItems,
-                @CompletedTasks, @PendingTasks, @Notes, @Tags,
+                @CompletedTasks, @PendingTasks, @InQuestionTasks, @PartiallyCompleteTasks,
+                @RescheduledTasks, @CancelledTasks, @StarredTasks, @AttentionTasks,
+                @InformationTasks, @IdeaTasks, @Notes, @Tags,
                 @FilePath, @FileModifiedAt, @CreatedAt, @UpdatedAt
             );
             """;
@@ -124,7 +128,12 @@ public sealed class ObsidianDailyNotesRepository
                 SoulCount = @SoulCount, SoulItems = @SoulItems, BodyCount = @BodyCount, BodyItems = @BodyItems,
                 AreasCount = @AreasCount, AreasItems = @AreasItems, LifeCount = @LifeCount, LifeItems = @LifeItems,
                 IndulgingCount = @IndulgingCount, IndulgingItems = @IndulgingItems, WeatherItems = @WeatherItems,
-                CompletedTasks = @CompletedTasks, PendingTasks = @PendingTasks, Notes = @Notes, Tags = @Tags,
+                CompletedTasks = @CompletedTasks, PendingTasks = @PendingTasks,
+                InQuestionTasks = @InQuestionTasks, PartiallyCompleteTasks = @PartiallyCompleteTasks,
+                RescheduledTasks = @RescheduledTasks, CancelledTasks = @CancelledTasks,
+                StarredTasks = @StarredTasks, AttentionTasks = @AttentionTasks,
+                InformationTasks = @InformationTasks, IdeaTasks = @IdeaTasks,
+                Notes = @Notes, Tags = @Tags,
                 FilePath = @FilePath, FileModifiedAt = @FileModifiedAt, UpdatedAt = @UpdatedAt
             WHERE Date = @Date;
             """;
@@ -160,6 +169,14 @@ public sealed class ObsidianDailyNotesRepository
         WeatherItems = SerializeList(note.WeatherItems),
         CompletedTasks = SerializeList(note.CompletedTasks),
         PendingTasks = SerializeList(note.PendingTasks),
+        InQuestionTasks = SerializeList(note.InQuestionTasks),
+        PartiallyCompleteTasks = SerializeList(note.PartiallyCompleteTasks),
+        RescheduledTasks = SerializeList(note.RescheduledTasks),
+        CancelledTasks = SerializeList(note.CancelledTasks),
+        StarredTasks = SerializeList(note.StarredTasks),
+        AttentionTasks = SerializeList(note.AttentionTasks),
+        InformationTasks = SerializeList(note.InformationTasks),
+        IdeaTasks = SerializeList(note.IdeaTasks),
         note.Notes,
         Tags = SerializeList(note.Tags),
         note.FilePath,
@@ -210,6 +227,14 @@ public sealed class ObsidianDailyNotesRepository
         WeatherItems = DeserializeList(row.WeatherItems),
         CompletedTasks = DeserializeList(row.CompletedTasks),
         PendingTasks = DeserializeList(row.PendingTasks),
+        InQuestionTasks = DeserializeList(row.InQuestionTasks),
+        PartiallyCompleteTasks = DeserializeList(row.PartiallyCompleteTasks),
+        RescheduledTasks = DeserializeList(row.RescheduledTasks),
+        CancelledTasks = DeserializeList(row.CancelledTasks),
+        StarredTasks = DeserializeList(row.StarredTasks),
+        AttentionTasks = DeserializeList(row.AttentionTasks),
+        InformationTasks = DeserializeList(row.InformationTasks),
+        IdeaTasks = DeserializeList(row.IdeaTasks),
         Notes = row.Notes,
         Tags = DeserializeList(row.Tags),
         FilePath = row.FilePath,
@@ -246,6 +271,14 @@ public sealed class ObsidianDailyNotesRepository
         public string? WeatherItems { get; set; }
         public string? CompletedTasks { get; set; }
         public string? PendingTasks { get; set; }
+        public string? InQuestionTasks { get; set; }
+        public string? PartiallyCompleteTasks { get; set; }
+        public string? RescheduledTasks { get; set; }
+        public string? CancelledTasks { get; set; }
+        public string? StarredTasks { get; set; }
+        public string? AttentionTasks { get; set; }
+        public string? InformationTasks { get; set; }
+        public string? IdeaTasks { get; set; }
         public string? Notes { get; set; }
         public string? Tags { get; set; }
         public string FilePath { get; set; } = string.Empty;

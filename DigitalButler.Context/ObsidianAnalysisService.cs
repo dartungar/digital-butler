@@ -173,7 +173,7 @@ public sealed class ObsidianAnalysisService : IObsidianAnalysisService
 
         // Tasks
         sb.AppendLine("TASKS:");
-        sb.AppendLine($"  Completed: {analysis.TotalCompletedTasks}");
+        sb.AppendLine($"  Completed [x]: {analysis.TotalCompletedTasks}");
         if (analysis.CompletedTasksList.Count > 0)
         {
             foreach (var task in analysis.CompletedTasksList.Take(10))
@@ -181,13 +181,86 @@ public sealed class ObsidianAnalysisService : IObsidianAnalysisService
             if (analysis.CompletedTasksList.Count > 10)
                 sb.AppendLine($"    ... and {analysis.CompletedTasksList.Count - 10} more");
         }
-        sb.AppendLine($"  Pending: {analysis.TotalPendingTasks}");
+
+        sb.AppendLine($"  Pending [ ]: {analysis.TotalPendingTasks}");
         if (analysis.PendingTasksList.Count > 0)
         {
             foreach (var task in analysis.PendingTasksList.Take(5))
                 sb.AppendLine($"    - {task}");
             if (analysis.PendingTasksList.Count > 5)
                 sb.AppendLine($"    ... and {analysis.PendingTasksList.Count - 5} more");
+        }
+
+        if (analysis.TotalPartiallyCompleteTasks > 0)
+        {
+            sb.AppendLine($"  Partially complete [/]: {analysis.TotalPartiallyCompleteTasks}");
+            foreach (var task in analysis.PartiallyCompleteTasksList.Take(5))
+                sb.AppendLine($"    - {task}");
+            if (analysis.PartiallyCompleteTasksList.Count > 5)
+                sb.AppendLine($"    ... and {analysis.PartiallyCompleteTasksList.Count - 5} more");
+        }
+
+        if (analysis.TotalInQuestionTasks > 0)
+        {
+            sb.AppendLine($"  In question [?]: {analysis.TotalInQuestionTasks}");
+            foreach (var task in analysis.InQuestionTasksList.Take(5))
+                sb.AppendLine($"    - {task}");
+            if (analysis.InQuestionTasksList.Count > 5)
+                sb.AppendLine($"    ... and {analysis.InQuestionTasksList.Count - 5} more");
+        }
+
+        if (analysis.TotalRescheduledTasks > 0)
+        {
+            sb.AppendLine($"  Rescheduled [>]: {analysis.TotalRescheduledTasks}");
+            foreach (var task in analysis.RescheduledTasksList.Take(5))
+                sb.AppendLine($"    - {task}");
+            if (analysis.RescheduledTasksList.Count > 5)
+                sb.AppendLine($"    ... and {analysis.RescheduledTasksList.Count - 5} more");
+        }
+
+        if (analysis.TotalCancelledTasks > 0)
+        {
+            sb.AppendLine($"  Cancelled [-]: {analysis.TotalCancelledTasks}");
+            foreach (var task in analysis.CancelledTasksList.Take(5))
+                sb.AppendLine($"    - {task}");
+            if (analysis.CancelledTasksList.Count > 5)
+                sb.AppendLine($"    ... and {analysis.CancelledTasksList.Count - 5} more");
+        }
+
+        if (analysis.TotalStarredTasks > 0)
+        {
+            sb.AppendLine($"  Starred [*]: {analysis.TotalStarredTasks}");
+            foreach (var task in analysis.StarredTasksList.Take(5))
+                sb.AppendLine($"    - {task}");
+            if (analysis.StarredTasksList.Count > 5)
+                sb.AppendLine($"    ... and {analysis.StarredTasksList.Count - 5} more");
+        }
+
+        if (analysis.TotalAttentionTasks > 0)
+        {
+            sb.AppendLine($"  Needs attention [!]: {analysis.TotalAttentionTasks}");
+            foreach (var task in analysis.AttentionTasksList.Take(5))
+                sb.AppendLine($"    - {task}");
+            if (analysis.AttentionTasksList.Count > 5)
+                sb.AppendLine($"    ... and {analysis.AttentionTasksList.Count - 5} more");
+        }
+
+        if (analysis.TotalInformationTasks > 0)
+        {
+            sb.AppendLine($"  Information [i]: {analysis.TotalInformationTasks}");
+            foreach (var task in analysis.InformationTasksList.Take(5))
+                sb.AppendLine($"    - {task}");
+            if (analysis.InformationTasksList.Count > 5)
+                sb.AppendLine($"    ... and {analysis.InformationTasksList.Count - 5} more");
+        }
+
+        if (analysis.TotalIdeaTasks > 0)
+        {
+            sb.AppendLine($"  Ideas [I]: {analysis.TotalIdeaTasks}");
+            foreach (var task in analysis.IdeaTasksList.Take(5))
+                sb.AppendLine($"    - {task}");
+            if (analysis.IdeaTasksList.Count > 5)
+                sb.AppendLine($"    ... and {analysis.IdeaTasksList.Count - 5} more");
         }
 
         // Tags
@@ -275,13 +348,34 @@ public sealed class ObsidianAnalysisService : IObsidianAnalysisService
         result.TotalIndulgingCount = notes.Sum(n => n.IndulgingCount ?? 0);
         result.TotalMeditationMinutes = notes.Sum(n => n.MeditationMinutes ?? 0);
 
-        // Collect tasks
-        result.CompletedTasksList = notes
+        // Collect tasks by category
+        var completedTasks = notes
             .Where(n => n.CompletedTasks != null)
             .SelectMany(n => n.CompletedTasks!)
             .Distinct()
             .ToList();
+
+        var rescheduledTasks = notes
+            .Where(n => n.RescheduledTasks != null)
+            .SelectMany(n => n.RescheduledTasks!)
+            .Distinct()
+            .ToList();
+
+        // For weekly summaries: tasks that were rescheduled but later completed within the same week
+        // should count as completed (remove from rescheduled, keep in completed)
+        if (isWeekly)
+        {
+            var completedSet = new HashSet<string>(completedTasks, StringComparer.OrdinalIgnoreCase);
+            rescheduledTasks = rescheduledTasks
+                .Where(t => !completedSet.Contains(t))
+                .ToList();
+        }
+
+        result.CompletedTasksList = completedTasks;
         result.TotalCompletedTasks = result.CompletedTasksList.Count;
+
+        result.RescheduledTasksList = rescheduledTasks;
+        result.TotalRescheduledTasks = result.RescheduledTasksList.Count;
 
         result.PendingTasksList = notes
             .Where(n => n.PendingTasks != null)
@@ -289,6 +383,55 @@ public sealed class ObsidianAnalysisService : IObsidianAnalysisService
             .Distinct()
             .ToList();
         result.TotalPendingTasks = result.PendingTasksList.Count;
+
+        result.InQuestionTasksList = notes
+            .Where(n => n.InQuestionTasks != null)
+            .SelectMany(n => n.InQuestionTasks!)
+            .Distinct()
+            .ToList();
+        result.TotalInQuestionTasks = result.InQuestionTasksList.Count;
+
+        result.PartiallyCompleteTasksList = notes
+            .Where(n => n.PartiallyCompleteTasks != null)
+            .SelectMany(n => n.PartiallyCompleteTasks!)
+            .Distinct()
+            .ToList();
+        result.TotalPartiallyCompleteTasks = result.PartiallyCompleteTasksList.Count;
+
+        result.CancelledTasksList = notes
+            .Where(n => n.CancelledTasks != null)
+            .SelectMany(n => n.CancelledTasks!)
+            .Distinct()
+            .ToList();
+        result.TotalCancelledTasks = result.CancelledTasksList.Count;
+
+        result.StarredTasksList = notes
+            .Where(n => n.StarredTasks != null)
+            .SelectMany(n => n.StarredTasks!)
+            .Distinct()
+            .ToList();
+        result.TotalStarredTasks = result.StarredTasksList.Count;
+
+        result.AttentionTasksList = notes
+            .Where(n => n.AttentionTasks != null)
+            .SelectMany(n => n.AttentionTasks!)
+            .Distinct()
+            .ToList();
+        result.TotalAttentionTasks = result.AttentionTasksList.Count;
+
+        result.InformationTasksList = notes
+            .Where(n => n.InformationTasks != null)
+            .SelectMany(n => n.InformationTasks!)
+            .Distinct()
+            .ToList();
+        result.TotalInformationTasks = result.InformationTasksList.Count;
+
+        result.IdeaTasksList = notes
+            .Where(n => n.IdeaTasks != null)
+            .SelectMany(n => n.IdeaTasks!)
+            .Distinct()
+            .ToList();
+        result.TotalIdeaTasks = result.IdeaTasksList.Count;
 
         // Collect tags and count occurrences
         var tagCounts = notes

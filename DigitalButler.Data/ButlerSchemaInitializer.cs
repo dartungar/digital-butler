@@ -127,6 +127,14 @@ public sealed class ButlerSchemaInitializer
                 WeatherItems TEXT NULL,
                 CompletedTasks TEXT NULL,
                 PendingTasks TEXT NULL,
+                InQuestionTasks TEXT NULL,
+                PartiallyCompleteTasks TEXT NULL,
+                RescheduledTasks TEXT NULL,
+                CancelledTasks TEXT NULL,
+                StarredTasks TEXT NULL,
+                AttentionTasks TEXT NULL,
+                InformationTasks TEXT NULL,
+                IdeaTasks TEXT NULL,
                 Notes TEXT NULL,
                 Tags TEXT NULL,
                 FilePath TEXT NOT NULL,
@@ -232,6 +240,79 @@ public sealed class ButlerSchemaInitializer
         try
         {
             await conn.ExecuteAsync("ALTER TABLE ContextItems ADD COLUMN MediaType TEXT NULL;");
+        }
+        catch
+        {
+            // Intentionally ignored
+        }
+
+        // Add new task status columns to ObsidianDailyNotes
+        try
+        {
+            await conn.ExecuteAsync("ALTER TABLE ObsidianDailyNotes ADD COLUMN InQuestionTasks TEXT NULL;");
+        }
+        catch
+        {
+            // Intentionally ignored
+        }
+
+        try
+        {
+            await conn.ExecuteAsync("ALTER TABLE ObsidianDailyNotes ADD COLUMN PartiallyCompleteTasks TEXT NULL;");
+        }
+        catch
+        {
+            // Intentionally ignored
+        }
+
+        try
+        {
+            await conn.ExecuteAsync("ALTER TABLE ObsidianDailyNotes ADD COLUMN RescheduledTasks TEXT NULL;");
+        }
+        catch
+        {
+            // Intentionally ignored
+        }
+
+        try
+        {
+            await conn.ExecuteAsync("ALTER TABLE ObsidianDailyNotes ADD COLUMN CancelledTasks TEXT NULL;");
+        }
+        catch
+        {
+            // Intentionally ignored
+        }
+
+        try
+        {
+            await conn.ExecuteAsync("ALTER TABLE ObsidianDailyNotes ADD COLUMN StarredTasks TEXT NULL;");
+        }
+        catch
+        {
+            // Intentionally ignored
+        }
+
+        try
+        {
+            await conn.ExecuteAsync("ALTER TABLE ObsidianDailyNotes ADD COLUMN AttentionTasks TEXT NULL;");
+        }
+        catch
+        {
+            // Intentionally ignored
+        }
+
+        try
+        {
+            await conn.ExecuteAsync("ALTER TABLE ObsidianDailyNotes ADD COLUMN InformationTasks TEXT NULL;");
+        }
+        catch
+        {
+            // Intentionally ignored
+        }
+
+        try
+        {
+            await conn.ExecuteAsync("ALTER TABLE ObsidianDailyNotes ADD COLUMN IdeaTasks TEXT NULL;");
         }
         catch
         {

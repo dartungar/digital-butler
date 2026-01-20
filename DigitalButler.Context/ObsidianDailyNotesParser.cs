@@ -13,8 +13,11 @@ public static class ObsidianDailyNotesParser
         @"^---\s*\n(.*?)\n---\s*\n",
         RegexOptions.Singleline | RegexOptions.Compiled);
 
+    // Matches various checkbox types: [ ] pending, [x]/[X] completed, [?] in question,
+    // [/] partially complete, [>] rescheduled, [-] cancelled, [*] starred,
+    // [!] attention, [i] information, [I] idea
     private static readonly Regex CheckboxRegex = new(
-        @"^-\s*\[([ xX])\]\s*(.+)$",
+        @"^-\s*\[([ xX?/>\-\*!iI])\]\s*(.+)$",
         RegexOptions.Multiline | RegexOptions.Compiled);
 
     private static readonly Regex InlineTagRegex = new(
@@ -146,26 +149,72 @@ public static class ObsidianDailyNotesParser
         // Remove tasks code blocks (Obsidian Tasks plugin queries)
         var cleanedBody = TasksCodeBlockRegex.Replace(body, "");
 
-        // Extract tasks
+        // Extract tasks by status
         var completedTasks = new List<string>();
         var pendingTasks = new List<string>();
+        var inQuestionTasks = new List<string>();
+        var partiallyCompleteTasks = new List<string>();
+        var rescheduledTasks = new List<string>();
+        var cancelledTasks = new List<string>();
+        var starredTasks = new List<string>();
+        var attentionTasks = new List<string>();
+        var informationTasks = new List<string>();
+        var ideaTasks = new List<string>();
 
         foreach (Match match in CheckboxRegex.Matches(cleanedBody))
         {
-            var isCompleted = match.Groups[1].Value.ToUpperInvariant() == "X";
+            var marker = match.Groups[1].Value;
             var taskText = match.Groups[2].Value.Trim();
 
-            if (!string.IsNullOrWhiteSpace(taskText))
+            if (string.IsNullOrWhiteSpace(taskText))
+                continue;
+
+            var status = ParseTaskStatus(marker);
+            switch (status)
             {
-                if (isCompleted)
+                case ObsidianTaskStatus.Completed:
                     completedTasks.Add(taskText);
-                else
+                    break;
+                case ObsidianTaskStatus.Pending:
                     pendingTasks.Add(taskText);
+                    break;
+                case ObsidianTaskStatus.InQuestion:
+                    inQuestionTasks.Add(taskText);
+                    break;
+                case ObsidianTaskStatus.PartiallyComplete:
+                    partiallyCompleteTasks.Add(taskText);
+                    break;
+                case ObsidianTaskStatus.Rescheduled:
+                    rescheduledTasks.Add(taskText);
+                    break;
+                case ObsidianTaskStatus.Cancelled:
+                    cancelledTasks.Add(taskText);
+                    break;
+                case ObsidianTaskStatus.Starred:
+                    starredTasks.Add(taskText);
+                    break;
+                case ObsidianTaskStatus.Attention:
+                    attentionTasks.Add(taskText);
+                    break;
+                case ObsidianTaskStatus.Information:
+                    informationTasks.Add(taskText);
+                    break;
+                case ObsidianTaskStatus.Idea:
+                    ideaTasks.Add(taskText);
+                    break;
             }
         }
 
         note.CompletedTasks = completedTasks.Count > 0 ? completedTasks : null;
         note.PendingTasks = pendingTasks.Count > 0 ? pendingTasks : null;
+        note.InQuestionTasks = inQuestionTasks.Count > 0 ? inQuestionTasks : null;
+        note.PartiallyCompleteTasks = partiallyCompleteTasks.Count > 0 ? partiallyCompleteTasks : null;
+        note.RescheduledTasks = rescheduledTasks.Count > 0 ? rescheduledTasks : null;
+        note.CancelledTasks = cancelledTasks.Count > 0 ? cancelledTasks : null;
+        note.StarredTasks = starredTasks.Count > 0 ? starredTasks : null;
+        note.AttentionTasks = attentionTasks.Count > 0 ? attentionTasks : null;
+        note.InformationTasks = informationTasks.Count > 0 ? informationTasks : null;
+        note.IdeaTasks = ideaTasks.Count > 0 ? ideaTasks : null;
 
         // Extract journal section
         var journalContent = ExtractJournalSection(cleanedBody);
@@ -376,5 +425,24 @@ public static class ObsidianDailyNotesParser
             normalized = normalized["journal/".Length..];
         }
         return normalized;
+    }
+
+    private static ObsidianTaskStatus ParseTaskStatus(string marker)
+    {
+        // Note: case-sensitive for [i] (information) vs [I] (idea)
+        return marker switch
+        {
+            "x" or "X" => ObsidianTaskStatus.Completed,
+            " " => ObsidianTaskStatus.Pending,
+            "?" => ObsidianTaskStatus.InQuestion,
+            "/" => ObsidianTaskStatus.PartiallyComplete,
+            ">" => ObsidianTaskStatus.Rescheduled,
+            "-" => ObsidianTaskStatus.Cancelled,
+            "*" => ObsidianTaskStatus.Starred,
+            "!" => ObsidianTaskStatus.Attention,
+            "i" => ObsidianTaskStatus.Information,
+            "I" => ObsidianTaskStatus.Idea,
+            _ => ObsidianTaskStatus.Pending // Default to pending for unknown markers
+        };
     }
 }
