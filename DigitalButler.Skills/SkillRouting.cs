@@ -14,6 +14,11 @@ public readonly record struct SkillRoute(ButlerSkill Skill)
 public interface ISkillRouter
 {
     Task<SkillRoute> RouteAsync(string text, CancellationToken ct = default);
+
+    /// <summary>
+    /// Routes the message and determines if vault search enrichment would be helpful.
+    /// </summary>
+    Task<SkillRoutingResult> RouteWithEnrichmentAsync(string text, CancellationToken ct = default);
 }
 
 public sealed class OpenAiSkillRouter : ISkillRouter
@@ -31,9 +36,25 @@ public sealed class OpenAiSkillRouter : ISkillRouter
 
     public async Task<SkillRoute> RouteAsync(string text, CancellationToken ct = default)
     {
+        var result = await RouteWithEnrichmentAsync(text, ct);
+        return new SkillRoute(result.Skill);
+    }
+
+    public async Task<SkillRoutingResult> RouteWithEnrichmentAsync(string text, CancellationToken ct = default)
+    {
         if (string.IsNullOrWhiteSpace(text))
         {
-            return new SkillRoute(ButlerSkill.DailySummary);
+            return new SkillRoutingResult { Skill = ButlerSkill.DailySummary };
+        }
+
+        return await RouteInternalAsync(text, ct);
+    }
+
+    private async Task<SkillRoutingResult> RouteInternalAsync(string text, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return new SkillRoutingResult { Skill = ButlerSkill.DailySummary };
         }
 
         // Skill routing needs AI settings. Prefer task-specific configuration, but if this task
@@ -50,7 +71,7 @@ public sealed class OpenAiSkillRouter : ISkillRouter
         }
         if (string.IsNullOrWhiteSpace(settings.ApiKey) || string.IsNullOrWhiteSpace(settings.Model))
         {
-            return new SkillRoute(ButlerSkill.DailySummary);
+            return new SkillRoutingResult { Skill = ButlerSkill.DailySummary };
         }
 
         var endpoint = OpenAiEndpoint.ResolveEndpoint(settings.BaseUrl);
@@ -63,75 +84,168 @@ Pick exactly one skill for the user's message:
 - activities (suggest what to do based on energy/mood)
 - drawing_reference (find a drawing reference image)
 - calendar_event (create a new calendar event)
+- vault_search (search user's notes/knowledge base)
 
-Return ONLY one of these tokens:
-summary_daily
-summary_weekly
-motivation
-activities
-drawing_reference
-calendar_event
+Also determine if the skill would benefit from searching the user's Obsidian vault for relevant notes.
 
-Output rules:
-- Output the token only (no other words like "Answer:" and no punctuation).
-- Lowercase.
-- Do NOT abbreviate.
+Return a JSON object with exactly these fields:
+{
+  "skill": "<skill_token>",
+  "needs_vault": <true|false>,
+  "vault_query": "<search query or null>"
+}
+
+Skill tokens: summary_daily, summary_weekly, motivation, activities, drawing_reference, calendar_event, vault_search
+
+Rules for needs_vault:
+- TRUE if the message references specific projects, topics, or past events that might be in notes
+- TRUE if the message asks about past activities, what they did, or personal history
+- TRUE for vault_search skill (always)
+- FALSE for simple agenda/calendar queries
+- FALSE for drawing_reference (uses external image API)
+- FALSE for calendar_event creation (doesn't need context from notes)
+
+For vault_query: Extract the core search topic. If dates are mentioned, keep them in the query.
 
 Examples:
 User: get me a daily summary
-Answer: summary_daily
+{"skill":"summary_daily","needs_vault":false,"vault_query":null}
 
 User: weekly summary please
-Answer: summary_weekly
+{"skill":"summary_weekly","needs_vault":false,"vault_query":null}
 
-User: what's on my calendar today?
-Answer: summary_daily
+User: what did I do yesterday?
+{"skill":"vault_search","needs_vault":true,"vault_query":"yesterday daily note"}
+
+User: what's in my notes about home renovation?
+{"skill":"vault_search","needs_vault":true,"vault_query":"home renovation"}
+
+User: help me with project X based on my notes
+{"skill":"summary_daily","needs_vault":true,"vault_query":"project X"}
 
 User: motivate me
-Answer: motivation
+{"skill":"motivation","needs_vault":false,"vault_query":null}
 
-User: what should I do tonight?
-Answer: activities
+User: motivate me based on my recent progress
+{"skill":"motivation","needs_vault":true,"vault_query":"recent progress achievements"}
 
 User: I want a drawing reference for hands
-Answer: drawing_reference
-
-User: I want to practice drawing
-Answer: drawing_reference
+{"skill":"drawing_reference","needs_vault":false,"vault_query":null}
 
 User: schedule a meeting with John tomorrow at 3pm
-Answer: calendar_event
+{"skill":"calendar_event","needs_vault":false,"vault_query":null}
 
-User: add dentist appointment on Friday at 10am
-Answer: calendar_event
+User: what meetings did I have last week?
+{"skill":"vault_search","needs_vault":true,"vault_query":"meetings last week"}
 
-User: create event for lunch with Sarah next Monday
-Answer: calendar_event
+User: search my notes for machine learning
+{"skill":"vault_search","needs_vault":true,"vault_query":"machine learning"}
+
+User: find my notes on cooking recipes
+{"skill":"vault_search","needs_vault":true,"vault_query":"cooking recipes"}
 """;
 
         var input = "User message:\n" + text.Trim();
 
         try
         {
-            var (token, raw) = await SendResponsesAsync(endpoint, settings, systemPrompt, input, ct);
-            if (TryParseRouteToken(token, out var route))
+            var (responseText, raw) = await SendResponsesAsync(endpoint, settings, systemPrompt, input, ct);
+
+            // Try to parse as JSON first (new format)
+            if (TryParseRoutingJson(responseText, out var routingResult))
             {
-                _logger.LogInformation("Skill routing chose {Skill} (weekly={Weekly}) for message length {Len}", route.Skill, route.PreferWeeklySummary, text.Length);
-                return route;
+                _logger.LogInformation(
+                    "Skill routing chose {Skill} (needsVault={NeedsVault}, query={Query}) for message length {Len}",
+                    routingResult.Skill, routingResult.NeedsVaultEnrichment, routingResult.VaultSearchQuery, text.Length);
+                return routingResult;
+            }
+
+            // Fall back to legacy token parsing
+            if (TryParseRouteToken(responseText, out var route))
+            {
+                _logger.LogInformation("Skill routing chose {Skill} (legacy format) for message length {Len}", route.Skill, text.Length);
+                return new SkillRoutingResult { Skill = route.Skill };
             }
 
             // Important: never attempt to infer from the raw JSON body (it can contain unrelated words).
             var rawPreview = raw.Length <= 4000 ? raw : raw[..4000] + "…";
             _logger.LogWarning("Skill router raw response (truncated): {Raw}", rawPreview);
 
-            _logger.LogWarning("Skill router returned unexpected token '{Token}'. Defaulting to daily summary.", token);
-            return new SkillRoute(ButlerSkill.DailySummary);
+            _logger.LogWarning("Skill router returned unexpected response '{Token}'. Defaulting to daily summary.", responseText);
+            return new SkillRoutingResult { Skill = ButlerSkill.DailySummary };
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Skill routing failed; defaulting to daily summary");
-            return new SkillRoute(ButlerSkill.DailySummary);
+            return new SkillRoutingResult { Skill = ButlerSkill.DailySummary };
         }
+    }
+
+    private static bool TryParseRoutingJson(string response, out SkillRoutingResult result)
+    {
+        result = new SkillRoutingResult();
+
+        if (string.IsNullOrWhiteSpace(response))
+            return false;
+
+        // Try to extract JSON from the response (it might be wrapped in markdown code blocks)
+        var json = response.Trim();
+        if (json.StartsWith("```"))
+        {
+            var lines = json.Split('\n');
+            var jsonLines = lines.Skip(1).TakeWhile(l => !l.StartsWith("```"));
+            json = string.Join("\n", jsonLines);
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (!root.TryGetProperty("skill", out var skillProp))
+                return false;
+
+            var skillToken = skillProp.GetString()?.ToLowerInvariant() ?? "";
+            if (!TryParseSkillToken(skillToken, out var skill))
+                return false;
+
+            result.Skill = skill;
+
+            if (root.TryGetProperty("needs_vault", out var needsVaultProp))
+            {
+                result.NeedsVaultEnrichment = needsVaultProp.ValueKind == JsonValueKind.True;
+            }
+
+            if (root.TryGetProperty("vault_query", out var queryProp) && queryProp.ValueKind == JsonValueKind.String)
+            {
+                result.VaultSearchQuery = queryProp.GetString();
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryParseSkillToken(string token, out ButlerSkill skill)
+    {
+        skill = ButlerSkill.DailySummary;
+
+        // Normalize token
+        token = token.Trim().ToLowerInvariant();
+
+        // Handle common variations
+        if (token.Contains("summary_daily") || token == "summary") { skill = ButlerSkill.DailySummary; return true; }
+        if (token.Contains("summary_weekly")) { skill = ButlerSkill.WeeklySummary; return true; }
+        if (token.Contains("motivation") || token is "mot" or "motiv" or "motivational") { skill = ButlerSkill.Motivation; return true; }
+        if (token.Contains("activities") || token is "act" or "activity") { skill = ButlerSkill.Activities; return true; }
+        if (token.Contains("drawing_reference") || token is "draw" or "drawing" or "reference") { skill = ButlerSkill.DrawingReference; return true; }
+        if (token.Contains("calendar_event") || token is "calendar" or "event" or "schedule") { skill = ButlerSkill.CalendarEvent; return true; }
+        if (token.Contains("vault_search") || token is "vault" or "search" or "notes") { skill = ButlerSkill.VaultSearch; return true; }
+
+        return false;
     }
 
     private static bool TryParseRouteToken(string output, out SkillRoute route)

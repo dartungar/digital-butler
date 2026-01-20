@@ -1,5 +1,6 @@
 using DigitalButler.Context;
 using DigitalButler.Common;
+using DigitalButler.Skills.VaultSearch;
 
 namespace DigitalButler.Web;
 
@@ -37,6 +38,22 @@ public sealed class ManualSyncRunner : IManualSyncRunner
                 {
                     failures++;
                     messages.Add($"{updater.Source}: failed ({ex.GetType().Name})");
+                }
+            }
+
+            // Also run vault indexing as part of sync
+            var vaultIndexer = scope.ServiceProvider.GetService<IVaultIndexer>();
+            if (vaultIndexer != null)
+            {
+                try
+                {
+                    var result = await vaultIndexer.IndexVaultAsync(ct);
+                    messages.Add($"VaultSearch: indexed {result.NotesAdded} new, {result.NotesUpdated} updated, {result.ChunksCreated} chunks");
+                }
+                catch (Exception ex)
+                {
+                    failures++;
+                    messages.Add($"VaultSearch: failed ({ex.GetType().Name})");
                 }
             }
 

@@ -37,6 +37,12 @@ public interface ICalendarEventSkillExecutor
     Task<CreateEventResult> CreateEventAsync(ParsedCalendarEvent parsed, CancellationToken ct);
 }
 
+public interface IVaultSearchSkillExecutor
+{
+    Task<string> ExecuteAsync(string query, CancellationToken ct);
+    Task<string> GetStatsAsync(CancellationToken ct);
+}
+
 public record ParsedEventResult(ParsedCalendarEvent Parsed, string Preview);
 
 public record CreateEventResult(bool Success, string? HtmlLink, string? Error);

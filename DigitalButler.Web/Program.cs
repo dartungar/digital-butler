@@ -3,6 +3,7 @@ using DigitalButler.Common;
 using DigitalButler.Data;
 using DigitalButler.Data.Repositories;
 using DigitalButler.Skills;
+using DigitalButler.Skills.VaultSearch;
 using DigitalButler.Web.Components;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authentication;
@@ -124,6 +125,15 @@ MapEnv(envOverrides, "OBSIDIAN_VAULT_PATH", "Obsidian:VaultPath");
 MapEnv(envOverrides, "OBSIDIAN_DAILY_NOTES_PATTERN", "Obsidian:DailyNotesPattern");
 MapEnv(envOverrides, "OBSIDIAN_LOOKBACK_DAYS", "Obsidian:LookbackDays");
 
+// Vault search env vars
+MapEnv(envOverrides, "OBSIDIAN_SEARCH_ENABLED", "VaultSearch:Enabled");
+MapEnv(envOverrides, "OBSIDIAN_SEARCH_MIN_SCORE", "VaultSearch:MinScore");
+MapEnv(envOverrides, "OBSIDIAN_SEARCH_TOP_K", "VaultSearch:TopK");
+MapEnv(envOverrides, "EMBEDDING_MODEL", "VaultSearch:EmbeddingModel");
+MapEnv(envOverrides, "OBSIDIAN_SEARCH_EXCLUDE_PATTERNS", "VaultIndexer:ExcludePatterns");
+MapEnv(envOverrides, "OBSIDIAN_SEARCH_CHUNK_SIZE", "VaultIndexer:ChunkTargetTokens");
+MapEnv(envOverrides, "OBSIDIAN_SEARCH_BATCH_SIZE", "VaultIndexer:EmbeddingBatchSize");
+
 if (envOverrides.Count > 0)
 {
     builder.Configuration.AddInMemoryCollection(envOverrides);
@@ -145,6 +155,7 @@ builder.Services.AddScoped<AppSettingsRepository>();
 builder.Services.AddScoped<ObsidianDailyNotesRepository>();
 builder.Services.AddScoped<ContextUpdateLogRepository>();
 builder.Services.AddScoped<ObsidianWeeklySummaryRepository>();
+builder.Services.AddScoped<VaultSearchRepository>();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -172,6 +183,31 @@ builder.Services.Configure<GmailOptions>(builder.Configuration.GetSection("Gmail
 builder.Services.Configure<UnsplashOptions>(builder.Configuration.GetSection("Unsplash"));
 builder.Services.Configure<GoogleCalendarOAuthOptions>(builder.Configuration.GetSection("GoogleCalendarOAuth"));
 builder.Services.Configure<ObsidianOptions>(builder.Configuration.GetSection("Obsidian"));
+
+// Vault search configuration
+builder.Services.Configure<VaultSearchOptions>(builder.Configuration.GetSection("VaultSearch"));
+builder.Services.Configure<VaultIndexerOptions>(opts =>
+{
+    var obsidianPath = builder.Configuration["Obsidian:VaultPath"] ?? "/var/notes";
+    opts.VaultPath = obsidianPath;
+
+    var excludePatterns = builder.Configuration["VaultIndexer:ExcludePatterns"];
+    if (!string.IsNullOrWhiteSpace(excludePatterns))
+    {
+        opts.ExcludePatterns = excludePatterns.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+    }
+
+    if (int.TryParse(builder.Configuration["VaultIndexer:ChunkTargetTokens"], out var chunkSize))
+    {
+        opts.ChunkTargetTokens = chunkSize;
+    }
+
+    if (int.TryParse(builder.Configuration["VaultIndexer:EmbeddingBatchSize"], out var batchSize))
+    {
+        opts.EmbeddingBatchSize = batchSize;
+    }
+});
+
 builder.Services.AddHttpClient<ISummarizationService, OpenAiSummarizationService>();
 builder.Services.AddHttpClient<ISkillRouter, OpenAiSkillRouter>();
 builder.Services.AddHttpClient<IAiContextAugmenter, OpenAiContextAugmenter>();
@@ -192,6 +228,13 @@ builder.Services.AddHttpClient<GoogleCalendarContextSource>();
 builder.Services.AddScoped<GmailContextSource>();
 builder.Services.AddScoped<ObsidianDailyNotesContextSource>();
 builder.Services.AddScoped<IObsidianAnalysisService, ObsidianAnalysisService>();
+
+// Vault search services
+builder.Services.AddHttpClient<IEmbeddingService, OpenAiEmbeddingService>();
+builder.Services.AddScoped<INoteChunker, NoteChunker>();
+builder.Services.AddScoped<IDateQueryTranslator, DateQueryTranslator>();
+builder.Services.AddScoped<IVaultIndexer, VaultIndexer>();
+builder.Services.AddScoped<IVaultSearchService, VaultSearchService>();
 
 // Context updater registry - allows lookup by source
 builder.Services.AddScoped<IContextUpdaterRegistry, ContextUpdaterRegistry>();

@@ -1,6 +1,7 @@
 using DigitalButler.Common;
 using DigitalButler.Context;
 using DigitalButler.Skills;
+using DigitalButler.Skills.VaultSearch;
 using DigitalButler.Telegram.Skills;
 using DigitalButler.Telegram.State;
 using DigitalButler.Telegram.UI;
@@ -23,6 +24,8 @@ public sealed class TextMessageHandler : ITextMessageHandler
     private readonly IActivitiesSkillExecutor _activitiesExecutor;
     private readonly IDrawingReferenceSkillExecutor _drawingExecutor;
     private readonly ICalendarEventSkillExecutor _calendarExecutor;
+    private readonly IVaultSearchSkillExecutor _vaultSearchExecutor;
+    private readonly IVaultSearchService _vaultSearchService;
     private readonly IManualSyncRunner _syncRunner;
 
     public TextMessageHandler(
@@ -36,6 +39,8 @@ public sealed class TextMessageHandler : ITextMessageHandler
         IActivitiesSkillExecutor activitiesExecutor,
         IDrawingReferenceSkillExecutor drawingExecutor,
         ICalendarEventSkillExecutor calendarExecutor,
+        IVaultSearchSkillExecutor vaultSearchExecutor,
+        IVaultSearchService vaultSearchService,
         IManualSyncRunner syncRunner)
     {
         _logger = logger;
@@ -47,6 +52,8 @@ public sealed class TextMessageHandler : ITextMessageHandler
         _activitiesExecutor = activitiesExecutor;
         _drawingExecutor = drawingExecutor;
         _calendarExecutor = calendarExecutor;
+        _vaultSearchExecutor = vaultSearchExecutor;
+        _vaultSearchService = vaultSearchService;
         _syncRunner = syncRunner;
 
         var allowedUserIdStr = config["TELEGRAM_ALLOWED_USER_ID"];
@@ -164,6 +171,36 @@ public sealed class TextMessageHandler : ITextMessageHandler
         if (text.StartsWith("/activities", StringComparison.OrdinalIgnoreCase))
         {
             await HandleActivitiesAsync(bot, chatId, ct);
+            return;
+        }
+
+        if (text.StartsWith("/search", StringComparison.OrdinalIgnoreCase))
+        {
+            var query = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Skip(1).FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                await SendWithKeyboardAsync(bot, chatId, "Usage: /search <query>\nExample: /search home renovation", ct);
+                return;
+            }
+            await HandleVaultSearchAsync(bot, chatId, query, ct);
+            return;
+        }
+
+        if (text.StartsWith("/vaultstats", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleVaultStatsAsync(bot, chatId, ct);
+            return;
+        }
+
+        if (text.StartsWith("/debugsearch", StringComparison.OrdinalIgnoreCase))
+        {
+            var query = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Skip(1).FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                await SendWithKeyboardAsync(bot, chatId, "Usage: /debugsearch <query>", ct);
+                return;
+            }
+            await HandleDebugSearchAsync(bot, chatId, query, ct);
             return;
         }
 
@@ -342,10 +379,58 @@ public sealed class TextMessageHandler : ITextMessageHandler
         }
     }
 
+    private async Task HandleVaultSearchAsync(ITelegramBotClient bot, long chatId, string query, CancellationToken ct)
+    {
+        await SendWithKeyboardAsync(bot, chatId, "Searching vault...", ct);
+        try
+        {
+            var result = await _vaultSearchExecutor.ExecuteAsync(query, ct);
+            await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(result), ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Host shutting down
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to search vault");
+            await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), ct);
+        }
+    }
+
+    private async Task HandleVaultStatsAsync(ITelegramBotClient bot, long chatId, CancellationToken ct)
+    {
+        try
+        {
+            var stats = await _vaultSearchExecutor.GetStatsAsync(ct);
+            await SendWithKeyboardAsync(bot, chatId, stats, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get vault stats");
+            await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), ct);
+        }
+    }
+
+    private async Task HandleDebugSearchAsync(ITelegramBotClient bot, long chatId, string query, CancellationToken ct)
+    {
+        await SendWithKeyboardAsync(bot, chatId, "Running debug search...", ct);
+        try
+        {
+            var debugOutput = await _vaultSearchService.DebugSearchAsync(query, ct);
+            await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(debugOutput), ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Debug search failed");
+            await SendWithKeyboardAsync(bot, chatId, $"Debug search failed: {ex.GetType().Name}: {ex.Message}", ct);
+        }
+    }
+
     private async Task HandleSkillRoutingAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)
     {
-        var route = await _skillRouter.RouteAsync(text, ct);
-        switch (route.Skill)
+        var routingResult = await _skillRouter.RouteWithEnrichmentAsync(text, ct);
+        switch (routingResult.Skill)
         {
             case ButlerSkill.Motivation:
                 await HandleMotivationAsync(bot, chatId, userQuery: text, ct);
@@ -364,6 +449,10 @@ public sealed class TextMessageHandler : ITextMessageHandler
             case ButlerSkill.CalendarEvent:
                 var eventText = CalendarEventSkillExecutor.TryExtractEventText(text) ?? text;
                 await HandleAddEventAsync(bot, chatId, eventText, ct);
+                break;
+            case ButlerSkill.VaultSearch:
+                var searchQuery = routingResult.VaultSearchQuery ?? text;
+                await HandleVaultSearchAsync(bot, chatId, searchQuery, ct);
                 break;
             case ButlerSkill.DailySummary:
                 await HandleSummaryAsync(bot, chatId, weekly: false, ct);

@@ -2,6 +2,7 @@ using DigitalButler.Context;
 using DigitalButler.Common;
 using DigitalButler.Data.Repositories;
 using DigitalButler.Skills;
+using DigitalButler.Skills.VaultSearch;
 using Telegram.Bot;
 
 namespace DigitalButler.Web;
@@ -99,6 +100,33 @@ public class SchedulerService : BackgroundService
                             await _errorNotifier.NotifyErrorAsync($"Sync: {schedule.Source}", ex, ct);
                         }
                     }
+                }
+            }
+        }
+
+        // Run vault indexing every 30 minutes (at :00 and :30)
+        if (nowUtc.Minute % 30 == 0)
+        {
+            try
+            {
+                var vaultIndexer = scope.ServiceProvider.GetService<IVaultIndexer>();
+                if (vaultIndexer != null)
+                {
+                    var result = await vaultIndexer.IndexVaultAsync(ct);
+                    if (result.NotesAdded > 0 || result.NotesUpdated > 0 || result.NotesRemoved > 0)
+                    {
+                        _logger.LogInformation(
+                            "Vault indexing completed: {Added} added, {Updated} updated, {Removed} removed, {Chunks} chunks",
+                            result.NotesAdded, result.NotesUpdated, result.NotesRemoved, result.ChunksCreated);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Vault indexing failed");
+                if (_errorNotifier != null)
+                {
+                    await _errorNotifier.NotifyErrorAsync("Vault indexing", ex, ct);
                 }
             }
         }

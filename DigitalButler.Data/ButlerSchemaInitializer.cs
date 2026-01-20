@@ -175,6 +175,28 @@ public sealed class ButlerSchemaInitializer
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS VaultNotes (
+                Id TEXT NOT NULL PRIMARY KEY,
+                FilePath TEXT NOT NULL UNIQUE,
+                Title TEXT NULL,
+                ContentHash TEXT NOT NULL,
+                FileModifiedAt TEXT NOT NULL,
+                CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS NoteChunks (
+                Id TEXT NOT NULL PRIMARY KEY,
+                NoteId TEXT NOT NULL,
+                ChunkIndex INTEGER NOT NULL,
+                ChunkText TEXT NOT NULL,
+                StartLine INTEGER NULL,
+                EndLine INTEGER NULL,
+                CreatedAt TEXT NOT NULL,
+                FOREIGN KEY (NoteId) REFERENCES VaultNotes(Id) ON DELETE CASCADE,
+                UNIQUE(NoteId, ChunkIndex)
+            );
             """
         );
 
@@ -232,7 +254,27 @@ public sealed class ButlerSchemaInitializer
             CREATE INDEX IF NOT EXISTS IX_ContextUpdateLog_Timestamp ON ContextUpdateLog (Timestamp DESC);
             CREATE INDEX IF NOT EXISTS IX_ContextUpdateLog_Source ON ContextUpdateLog (Source);
             CREATE INDEX IF NOT EXISTS IX_ObsidianWeeklySummaries_WeekStart ON ObsidianWeeklySummaries (WeekStart DESC);
+            CREATE INDEX IF NOT EXISTS IX_VaultNotes_FilePath ON VaultNotes (FilePath);
+            CREATE INDEX IF NOT EXISTS IX_NoteChunks_NoteId ON NoteChunks (NoteId);
             """
         );
+
+        // Create sqlite-vec virtual table for vector search (if extension is loaded)
+        // text-embedding-3-small produces 1536-dimensional vectors
+        try
+        {
+            await conn.ExecuteAsync(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS vec_note_chunks USING vec0(
+                    chunk_id TEXT PRIMARY KEY,
+                    embedding float[1536]
+                );
+                """
+            );
+        }
+        catch
+        {
+            // sqlite-vec extension not available - vector search will be disabled
+        }
     }
 }

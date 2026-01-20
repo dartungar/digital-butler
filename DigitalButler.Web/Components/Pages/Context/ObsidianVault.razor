@@ -1,0 +1,346 @@
+@page "/context/obsidian-vault"
+@inject IVaultIndexer VaultIndexer
+@inject IVaultSearchService SearchService
+@inject VaultSearchRepository VaultRepo
+
+@using DigitalButler.Skills.VaultSearch
+@using DigitalButler.Data.Repositories
+@using DigitalButler.Common
+
+<PageTitle>Obsidian Vault Search</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">Obsidian Vault Search</h3>
+    <p class="subtitle is-6">Search your entire Obsidian vault using semantic search.</p>
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Index Status</h5>
+    </div>
+
+    <div class="columns">
+        <div class="column is-narrow">
+            <div class="field">
+                <label class="label">Indexed Notes</label>
+                <div class="control">
+                    <span class="tag is-medium is-info">@_stats.IndexedNotes</span>
+                </div>
+            </div>
+        </div>
+        <div class="column is-narrow">
+            <div class="field">
+                <label class="label">Indexed Chunks</label>
+                <div class="control">
+                    <span class="tag is-medium is-info">@_stats.IndexedChunks</span>
+                </div>
+            </div>
+        </div>
+        <div class="column is-narrow">
+            <div class="field">
+                <label class="label">Vector Extension</label>
+                <div class="control">
+                    @if (_stats.VecExtensionAvailable)
+                    {
+                        <span class="tag is-medium is-success">Available</span>
+                    }
+                    else
+                    {
+                        <span class="tag is-medium is-danger">Not Available</span>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="buttons">
+        <button class="button is-link" type="button" disabled="@_indexing" @onclick="RunIndexingAsync">
+            @if (_indexing)
+            {
+                <span class="icon is-small">
+                    <i class="fas fa-spinner fa-spin"></i>
+                </span>
+                <span>Indexing...</span>
+            }
+            else
+            {
+                <span>Index Vault</span>
+            }
+        </button>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_indexMessage))
+    {
+        <div class="notification @(_indexError ? "is-danger" : "is-success") is-light" style="white-space: pre-wrap;">
+            @_indexMessage
+        </div>
+    }
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Search</h5>
+    </div>
+
+    <div class="field has-addons">
+        <div class="control is-expanded">
+            <input class="input" type="text" placeholder="Search your vault... (e.g., 'home renovation' or 'what did I do yesterday')"
+                   @bind="_searchQuery" @bind:event="oninput" @onkeypress="HandleSearchKeyPress" />
+        </div>
+        <div class="control">
+            <button class="button is-link" type="button" disabled="@_searching" @onclick="SearchAsync">
+                @if (_searching)
+                {
+                    <span>Searching...</span>
+                }
+                else
+                {
+                    <span>Search</span>
+                }
+            </button>
+        </div>
+    </div>
+
+    @if (_searchResults is not null)
+    {
+        @if (_searchResults.Count == 0)
+        {
+            <div class="notification is-warning is-light">
+                No results found for "@_lastQuery". Try different keywords.
+            </div>
+        }
+        else
+        {
+            <p class="has-text-grey mb-3">Found @_searchResults.Count result(s) for "@_lastQuery"</p>
+
+            @foreach (var result in _searchResults)
+            {
+                <div class="box" style="cursor: pointer;" @onclick="() => ToggleResult(result)">
+                    <div class="level is-mobile">
+                        <div class="level-left">
+                            <div class="level-item">
+                                <div>
+                                    <p class="title is-6">@(result.Title ?? System.IO.Path.GetFileNameWithoutExtension(result.FilePath))</p>
+                                    <p class="subtitle is-7 has-text-grey">@result.FilePath</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="level-right">
+                            <div class="level-item">
+                                <span class="tag is-info">@((result.Score * 100).ToString("F0"))% match</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (_expandedResult == result)
+                    {
+                        <div class="content mt-3" style="white-space: pre-wrap; background: #f5f5f5; padding: 1rem; border-radius: 4px; font-size: 0.9rem; max-height: 400px; overflow-y: auto;">
+                            @GetCleanSnippet(result.ChunkText)
+                        </div>
+
+                        <div class="buttons mt-3">
+                            <a class="button is-small is-link is-light" href="@GetObsidianLink(result.FilePath)" target="_blank">
+                                Open in Obsidian
+                            </a>
+                        </div>
+                    }
+                </div>
+            }
+        }
+    }
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Recent Notes</h5>
+        <p class="has-text-grey is-size-7">Last 20 indexed notes</p>
+    </div>
+
+    @if (_recentNotes is null)
+    {
+        <p>Loading...</p>
+    }
+    else if (_recentNotes.Count == 0)
+    {
+        <p class="has-text-grey">No notes indexed yet. Click "Index Vault" to start.</p>
+    }
+    else
+    {
+        <div class="table-container">
+            <table class="table is-fullwidth is-striped is-hoverable is-narrow">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Path</th>
+                        <th>Modified</th>
+                        <th>Indexed</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var note in _recentNotes)
+                    {
+                        <tr>
+                            <td>@(note.Title ?? System.IO.Path.GetFileNameWithoutExtension(note.FilePath))</td>
+                            <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis;" title="@note.FilePath">
+                                @note.FilePath
+                            </td>
+                            <td style="white-space: nowrap;">@note.FileModifiedAt.LocalDateTime.ToString("g")</td>
+                            <td style="white-space: nowrap;">@note.UpdatedAt.LocalDateTime.ToString("g")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private VaultSearchStats _stats = new();
+    private List<VaultNote>? _recentNotes;
+    private List<VaultSearchResult>? _searchResults;
+    private VaultSearchResult? _expandedResult;
+
+    private bool _indexing;
+    private string? _indexMessage;
+    private bool _indexError;
+
+    private bool _searching;
+    private string? _searchQuery;
+    private string? _lastQuery;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshStatsAsync();
+        _recentNotes = (await VaultRepo.GetAllNotesAsync())
+            .OrderByDescending(n => n.UpdatedAt)
+            .Take(20)
+            .ToList();
+    }
+
+    private async Task RefreshStatsAsync()
+    {
+        _stats = await SearchService.GetStatsAsync();
+    }
+
+    private async Task RunIndexingAsync()
+    {
+        _indexing = true;
+        _indexMessage = null;
+        _indexError = false;
+        StateHasChanged();
+
+        try
+        {
+            var result = await VaultIndexer.IndexVaultAsync();
+
+            if (result.Errors.Count > 0)
+            {
+                _indexError = true;
+                _indexMessage = $"Indexing completed with errors:\n" +
+                               $"- Notes scanned: {result.NotesScanned}\n" +
+                               $"- Added: {result.NotesAdded}\n" +
+                               $"- Updated: {result.NotesUpdated}\n" +
+                               $"- Removed: {result.NotesRemoved}\n" +
+                               $"- Chunks created: {result.ChunksCreated}\n" +
+                               $"- Duration: {result.Duration.TotalSeconds:F1}s\n" +
+                               $"- Errors: {string.Join(", ", result.Errors.Take(5))}";
+            }
+            else
+            {
+                _indexMessage = $"Indexing completed successfully!\n" +
+                               $"- Notes scanned: {result.NotesScanned}\n" +
+                               $"- Added: {result.NotesAdded}\n" +
+                               $"- Updated: {result.NotesUpdated}\n" +
+                               $"- Removed: {result.NotesRemoved}\n" +
+                               $"- Chunks created: {result.ChunksCreated}\n" +
+                               $"- Duration: {result.Duration.TotalSeconds:F1}s";
+            }
+
+            await RefreshStatsAsync();
+            _recentNotes = (await VaultRepo.GetAllNotesAsync())
+                .OrderByDescending(n => n.UpdatedAt)
+                .Take(20)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _indexError = true;
+            _indexMessage = $"Indexing failed: {ex.Message}";
+        }
+        finally
+        {
+            _indexing = false;
+        }
+    }
+
+    private async Task HandleSearchKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SearchAsync();
+        }
+    }
+
+    private async Task SearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            return;
+        }
+
+        _searching = true;
+        _lastQuery = _searchQuery;
+        _expandedResult = null;
+        StateHasChanged();
+
+        try
+        {
+            _searchResults = (await SearchService.SearchAsync(_searchQuery)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _searchResults = new List<VaultSearchResult>();
+            _indexMessage = $"Search failed: {ex.Message}";
+            _indexError = true;
+        }
+        finally
+        {
+            _searching = false;
+        }
+    }
+
+    private void ToggleResult(VaultSearchResult result)
+    {
+        _expandedResult = _expandedResult == result ? null : result;
+    }
+
+    private static string GetCleanSnippet(string chunkText)
+    {
+        if (string.IsNullOrWhiteSpace(chunkText))
+            return string.Empty;
+
+        // Remove the [Note: ...] prefix
+        var lines = chunkText.Split('\n');
+        var startIndex = 0;
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (lines[i].StartsWith("[Note:") || lines[i].StartsWith("Date:") || lines[i].StartsWith("Tags:") || string.IsNullOrWhiteSpace(lines[i]))
+            {
+                startIndex = i + 1;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return string.Join("\n", lines.Skip(startIndex)).Trim();
+    }
+
+    private static string GetObsidianLink(string filePath)
+    {
+        // Create obsidian:// link - user should replace vault name
+        var encoded = Uri.EscapeDataString(filePath.Replace(".md", ""));
+        return $"obsidian://open?file={encoded}";
+    }
+}

@@ -61,7 +61,8 @@ public enum ButlerSkill
     Activities = 2,
     DrawingReference = 3,
     CalendarEvent = 4,
-    WeeklySummary = 5    // New
+    WeeklySummary = 5,
+    VaultSearch = 6      // Search Obsidian vault
 }
 
 public class SkillInstruction

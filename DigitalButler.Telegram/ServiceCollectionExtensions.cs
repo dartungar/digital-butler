@@ -22,6 +22,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IActivitiesSkillExecutor, ActivitiesSkillExecutor>();
         services.AddScoped<IDrawingReferenceSkillExecutor, DrawingReferenceSkillExecutor>();
         services.AddScoped<ICalendarEventSkillExecutor, CalendarEventSkillExecutor>();
+        services.AddScoped<IVaultSearchSkillExecutor, VaultSearchSkillExecutor>();
 
         // Message handlers (scoped - one per request)
         services.AddScoped<ITextMessageHandler, TextMessageHandler>();
