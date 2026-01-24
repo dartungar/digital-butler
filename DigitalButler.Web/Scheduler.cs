@@ -38,6 +38,20 @@ public class SchedulerService : BackgroundService
                 _bot == null ? "not configured" : "configured",
                 string.IsNullOrWhiteSpace(chatId) ? "not set" : $"set ({chatId})");
 
+            // Log configured schedules at startup
+            using (var scope = _services.CreateScope())
+            {
+                var schedules = scope.ServiceProvider.GetRequiredService<ScheduleRepository>();
+                var tzService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
+                var tz = await tzService.GetTimeZoneInfoAsync(stoppingToken);
+                var daily = await schedules.GetEnabledDailySummarySchedulesAsync(stoppingToken);
+                var weekly = await schedules.GetEnabledWeeklySummarySchedulesAsync(stoppingToken);
+                _logger.LogInformation("Timezone: {Timezone}, Daily schedules: [{DailyTimes}], Weekly schedules: [{WeeklyTimes}]",
+                    tz.Id,
+                    daily.Count == 0 ? "none" : string.Join(", ", daily.Select(s => s.Time.ToString("HH:mm"))),
+                    weekly.Count == 0 ? "none" : string.Join(", ", weekly.Select(s => $"{s.DayOfWeek} {s.Time:HH:mm}")));
+            }
+
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
@@ -133,10 +147,18 @@ public class SchedulerService : BackgroundService
 
         // Daily summaries
         var daily = await schedules.GetEnabledDailySummarySchedulesAsync(ct);
+        if (localNow.Minute == 0) // Log once per hour to avoid spam
+        {
+            _logger.LogInformation("Scheduler tick: localNow={LocalNow:HH:mm}, daily schedules count={Count}, times=[{Times}]",
+                localNow,
+                daily.Count,
+                string.Join(", ", daily.Select(s => s.Time.ToString("HH:mm"))));
+        }
         foreach (var sched in daily)
         {
             if (sched.Time.Hour == localNow.Hour && sched.Time.Minute == localNow.Minute)
             {
+                _logger.LogInformation("Daily summary schedule matched: {ScheduleTime} == {LocalNow:HH:mm}", sched.Time, localNow);
                 try
                 {
                     await SendSummaryAsync(scope.ServiceProvider, contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "daily-summary", chatId, ct);
@@ -154,10 +176,18 @@ public class SchedulerService : BackgroundService
 
         // Weekly summaries
         var weekly = await schedules.GetEnabledWeeklySummarySchedulesAsync(ct);
+        if (localNow.Minute == 0) // Log once per hour to avoid spam
+        {
+            _logger.LogInformation("Weekly schedules count={Count}, times=[{Times}]",
+                weekly.Count,
+                string.Join(", ", weekly.Select(s => $"{s.DayOfWeek} {s.Time:HH:mm}")));
+        }
         foreach (var sched in weekly)
         {
             if (sched.DayOfWeek == localNow.DayOfWeek && sched.Time.Hour == localNow.Hour && sched.Time.Minute == localNow.Minute)
             {
+                _logger.LogInformation("Weekly summary schedule matched: {DayOfWeek} {ScheduleTime} == {LocalDow} {LocalNow:HH:mm}",
+                    sched.DayOfWeek, sched.Time, localNow.DayOfWeek, localNow);
                 try
                 {
                     await SendSummaryAsync(scope.ServiceProvider, contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "weekly-summary", chatId, ct);
