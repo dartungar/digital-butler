@@ -46,6 +46,12 @@ public partial class DateQueryTranslator : IDateQueryTranslator
         var today = DateOnly.FromDateTime(referenceDate.Date);
 
         // Process each date pattern
+        // IMPORTANT: Process complex patterns FIRST (most specific to least specific)
+        // Then process specific dates BEFORE month names so "January 1st"
+        // is recognized as a single day, not the entire month
+        ProcessWeekOfYear(query, today, result);      // "last week of 2025"
+        ProcessWeekOfMonth(query, today, result);     // "first week of December"
+        ProcessWeekend(query, today, result);         // "last weekend", "this weekend"
         ProcessYesterday(query, today, result);
         ProcessToday(query, today, result);
         ProcessLastWeek(query, today, result);
@@ -56,10 +62,148 @@ public partial class DateQueryTranslator : IDateQueryTranslator
         ProcessWeeksAgo(query, today, result);
         ProcessMonthsAgo(query, today, result);
         ProcessLastDayOfWeek(query, today, result);
+        ProcessSpecificDate(query, today, result);    // Before ProcessMonthName!
         ProcessMonthName(query, today, result);
-        ProcessSpecificDate(query, result);
 
         return result;
+    }
+
+    private static void ProcessWeekOfYear(string query, DateOnly today, TranslatedQuery result)
+    {
+        // Match "last week of 2025", "first week of 2026"
+        var match = WeekOfYearRegex().Match(query);
+        if (!match.Success) return;
+
+        var position = match.Groups[1].Value.ToLowerInvariant();
+        if (!int.TryParse(match.Groups[2].Value, out var year)) return;
+
+        DateOnly start, end;
+        if (position == "last")
+        {
+            // Last week of the year = last 7 days of December
+            end = new DateOnly(year, 12, 31);
+            start = end.AddDays(-6);
+        }
+        else // first
+        {
+            // First week of the year = first 7 days of January
+            start = new DateOnly(year, 1, 1);
+            end = start.AddDays(6);
+        }
+
+        result.StartDate = start;
+        result.EndDate = end;
+
+        for (var d = start; d <= end; d = d.AddDays(1))
+        {
+            result.DateTerms.Add(d.ToString("yyyy-MM-dd"));
+        }
+    }
+
+    private static void ProcessWeekOfMonth(string query, DateOnly today, TranslatedQuery result)
+    {
+        // Match "first week of December", "last week of last December", "first week of this January", "first week of January 2025"
+        var match = WeekOfMonthRegex().Match(query);
+        if (!match.Success) return;
+
+        var position = match.Groups[1].Value.ToLowerInvariant(); // first/last
+        var monthModifier = match.Groups[2].Success ? match.Groups[2].Value.ToLowerInvariant() : null; // "last" or "this" before month name
+        var monthName = match.Groups[3].Value;
+        var hasYear = match.Groups[4].Success;
+
+        if (!TryParseMonthName(monthName, out var month)) return;
+
+        int year;
+        if (hasYear && int.TryParse(match.Groups[4].Value, out var specifiedYear))
+        {
+            year = specifiedYear;
+        }
+        else if (monthModifier == "this")
+        {
+            // "this January" always means January of the current year
+            year = today.Year;
+        }
+        else if (monthModifier == "last")
+        {
+            // "last December" means December of previous year if we're past December
+            year = month >= today.Month ? today.Year - 1 : today.Year;
+        }
+        else
+        {
+            // Default: if month is in the future, use last year
+            year = month > today.Month ? today.Year - 1 : today.Year;
+        }
+
+        var firstOfMonth = new DateOnly(year, month, 1);
+        var lastOfMonth = firstOfMonth.AddMonths(1).AddDays(-1);
+
+        DateOnly start, end;
+        if (position == "last")
+        {
+            // Last week of month = last 7 days
+            end = lastOfMonth;
+            start = end.AddDays(-6);
+        }
+        else // first
+        {
+            // First week of month = first 7 days
+            start = firstOfMonth;
+            end = start.AddDays(6);
+        }
+
+        result.StartDate = start;
+        result.EndDate = end;
+
+        for (var d = start; d <= end; d = d.AddDays(1))
+        {
+            result.DateTerms.Add(d.ToString("yyyy-MM-dd"));
+        }
+    }
+
+    private static void ProcessWeekend(string query, DateOnly today, TranslatedQuery result)
+    {
+        // Match "last weekend", "this weekend", "next weekend"
+        var match = WeekendRegex().Match(query);
+        if (!match.Success) return;
+
+        var modifier = match.Groups[1].Value.ToLowerInvariant();
+
+        // Find the Saturday of the relevant weekend
+        var currentDayOfWeek = today.DayOfWeek;
+        DateOnly saturday;
+
+        if (modifier == "last")
+        {
+            // Last weekend = previous Saturday-Sunday
+            var daysToLastSaturday = (int)currentDayOfWeek + 1; // +1 because Sunday is 0
+            if (currentDayOfWeek == DayOfWeek.Sunday)
+                daysToLastSaturday = 8; // Go back to previous Saturday
+            else if (currentDayOfWeek == DayOfWeek.Saturday)
+                daysToLastSaturday = 7; // Go back to previous Saturday
+            saturday = today.AddDays(-daysToLastSaturday);
+        }
+        else if (modifier == "next")
+        {
+            // Next weekend = upcoming Saturday-Sunday
+            var daysToNextSaturday = ((int)DayOfWeek.Saturday - (int)currentDayOfWeek + 7) % 7;
+            if (daysToNextSaturday == 0)
+                daysToNextSaturday = 7; // If today is Saturday, get next Saturday
+            saturday = today.AddDays(daysToNextSaturday);
+        }
+        else // "this"
+        {
+            // This weekend = Saturday-Sunday of current week
+            var daysToThisSaturday = ((int)DayOfWeek.Saturday - (int)currentDayOfWeek + 7) % 7;
+            saturday = today.AddDays(daysToThisSaturday);
+        }
+
+        var sunday = saturday.AddDays(1);
+
+        result.StartDate = saturday;
+        result.EndDate = sunday;
+
+        result.DateTerms.Add(saturday.ToString("yyyy-MM-dd"));
+        result.DateTerms.Add(sunday.ToString("yyyy-MM-dd"));
     }
 
     private static void ProcessYesterday(string query, DateOnly today, TranslatedQuery result)
@@ -253,7 +397,7 @@ public partial class DateQueryTranslator : IDateQueryTranslator
         result.DateTerms.Add(firstOfMonth.ToString("MMMM", CultureInfo.InvariantCulture));
     }
 
-    private static void ProcessSpecificDate(string query, TranslatedQuery result)
+    private static void ProcessSpecificDate(string query, DateOnly today, TranslatedQuery result)
     {
         // Match ISO dates like 2026-01-18
         var isoMatch = IsoDateRegex().Match(query);
@@ -263,16 +407,44 @@ public partial class DateQueryTranslator : IDateQueryTranslator
             return;
         }
 
-        // Match dates like "January 18" or "18 January"
+        // Match European dates like 01.01.2026 or 01/01/2026 (DD.MM.YYYY or DD/MM/YYYY)
+        var europeanMatch = EuropeanDateRegex().Match(query);
+        if (europeanMatch.Success)
+        {
+            if (int.TryParse(europeanMatch.Groups[1].Value, out var day) &&
+                int.TryParse(europeanMatch.Groups[2].Value, out var month) &&
+                int.TryParse(europeanMatch.Groups[3].Value, out var year))
+            {
+                if (month >= 1 && month <= 12 && day >= 1 && day <= DateTime.DaysInMonth(year, month))
+                {
+                    var targetDate = new DateOnly(year, month, day);
+                    AddDateTerms(result, targetDate, targetDate);
+                    return;
+                }
+            }
+        }
+
+        // Match dates like "January 18", "January 18th", "18 January", "18th January"
         var naturalMatch = NaturalDateRegex().Match(query);
         if (naturalMatch.Success)
         {
-            var dayStr = naturalMatch.Groups[1].Success ? naturalMatch.Groups[1].Value : naturalMatch.Groups[3].Value;
-            var monthStr = naturalMatch.Groups[2].Success ? naturalMatch.Groups[2].Value : naturalMatch.Groups[4].Value;
+            // Regex groups: 1=day (day-first), 2=month (day-first), 3=month (month-first), 4=day (month-first)
+            string dayStr, monthStr;
+            if (naturalMatch.Groups[1].Success)
+            {
+                // Pattern: "18 January" or "18th January"
+                dayStr = naturalMatch.Groups[1].Value;
+                monthStr = naturalMatch.Groups[2].Value;
+            }
+            else
+            {
+                // Pattern: "January 18" or "January 18th"
+                dayStr = naturalMatch.Groups[4].Value;
+                monthStr = naturalMatch.Groups[3].Value;
+            }
 
             if (int.TryParse(dayStr, out var day) && TryParseMonthName(monthStr, out var month))
             {
-                var today = DateOnly.FromDateTime(DateTime.Today);
                 var year = today.Year;
 
                 // If the date is in the future, assume last year
@@ -340,6 +512,18 @@ public partial class DateQueryTranslator : IDateQueryTranslator
         return false;
     }
 
+    // "first week of 2026", "last week of 2025"
+    [GeneratedRegex(@"\b(first|last)\s+week\s+of\s+(\d{4})\b", RegexOptions.IgnoreCase)]
+    private static partial Regex WeekOfYearRegex();
+
+    // "first week of December", "last week of last December", "first week of this January", "first week of January 2025"
+    [GeneratedRegex(@"\b(first|last)\s+week\s+of\s+(?:(last|this)\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(\d{4}))?\b", RegexOptions.IgnoreCase)]
+    private static partial Regex WeekOfMonthRegex();
+
+    // "last weekend", "this weekend", "next weekend"
+    [GeneratedRegex(@"\b(last|this|next)\s+weekend\b", RegexOptions.IgnoreCase)]
+    private static partial Regex WeekendRegex();
+
     [GeneratedRegex(@"\byesterday\b", RegexOptions.IgnoreCase)]
     private static partial Regex YesterdayRegex();
 
@@ -376,6 +560,11 @@ public partial class DateQueryTranslator : IDateQueryTranslator
     [GeneratedRegex(@"\b\d{4}-\d{2}-\d{2}\b")]
     private static partial Regex IsoDateRegex();
 
-    [GeneratedRegex(@"\b(?:(\d{1,2})\s+(january|february|march|april|may|june|july|august|september|october|november|december)|(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2}))\b", RegexOptions.IgnoreCase)]
+    // European date format: DD.MM.YYYY or DD/MM/YYYY
+    [GeneratedRegex(@"\b(\d{1,2})[./](\d{1,2})[./](\d{4})\b")]
+    private static partial Regex EuropeanDateRegex();
+
+    // Matches "18 January", "18th January", "January 18", "January 18th", "January 1st", etc.
+    [GeneratedRegex(@"\b(?:(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december)|(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?)\b", RegexOptions.IgnoreCase)]
     private static partial Regex NaturalDateRegex();
 }

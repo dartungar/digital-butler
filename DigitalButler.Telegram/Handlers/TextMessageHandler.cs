@@ -19,6 +19,7 @@ public sealed class TextMessageHandler : ITextMessageHandler
     private readonly ConversationStateManager _stateManager;
     private readonly ContextService _contextService;
     private readonly ISkillRouter _skillRouter;
+    private readonly IDateQueryTranslator _dateTranslator;
     private readonly ISummarySkillExecutor _summaryExecutor;
     private readonly IMotivationSkillExecutor _motivationExecutor;
     private readonly IActivitiesSkillExecutor _activitiesExecutor;
@@ -34,6 +35,7 @@ public sealed class TextMessageHandler : ITextMessageHandler
         ConversationStateManager stateManager,
         ContextService contextService,
         ISkillRouter skillRouter,
+        IDateQueryTranslator dateTranslator,
         ISummarySkillExecutor summaryExecutor,
         IMotivationSkillExecutor motivationExecutor,
         IActivitiesSkillExecutor activitiesExecutor,
@@ -47,6 +49,7 @@ public sealed class TextMessageHandler : ITextMessageHandler
         _stateManager = stateManager;
         _contextService = contextService;
         _skillRouter = skillRouter;
+        _dateTranslator = dateTranslator;
         _summaryExecutor = summaryExecutor;
         _motivationExecutor = motivationExecutor;
         _activitiesExecutor = activitiesExecutor;
@@ -269,12 +272,24 @@ public sealed class TextMessageHandler : ITextMessageHandler
         }
     }
 
-    private async Task HandleActivitiesAsync(ITelegramBotClient bot, long chatId, CancellationToken ct)
+    private Task HandleActivitiesAsync(ITelegramBotClient bot, long chatId, CancellationToken ct)
+    {
+        return HandleActivitiesWithEnrichmentAsync(bot, chatId, string.Empty, null, null, null, ct);
+    }
+
+    private async Task HandleActivitiesWithEnrichmentAsync(
+        ITelegramBotClient bot,
+        long chatId,
+        string userQuery,
+        string? vaultQuery,
+        DateOnly? startDate,
+        DateOnly? endDate,
+        CancellationToken ct)
     {
         await SendWithKeyboardAsync(bot, chatId, "Generating activities...", ct);
         try
         {
-            var result = await _activitiesExecutor.ExecuteAsync(ct);
+            var result = await _activitiesExecutor.ExecuteAsync(userQuery, vaultQuery, startDate, endDate, ct);
             if (string.IsNullOrWhiteSpace(result)) result = "No activities available.";
 
             await bot.SendTextMessageAsync(chatId, TruncateForTelegram(result),
@@ -430,13 +445,41 @@ public sealed class TextMessageHandler : ITextMessageHandler
     private async Task HandleSkillRoutingAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)
     {
         var routingResult = await _skillRouter.RouteWithEnrichmentAsync(text, ct);
+
+        // Parse temporal context from query or user text if vault enrichment is needed
+        DateOnly? startDate = null;
+        DateOnly? endDate = null;
+        string? vaultQuery = null;
+
+        if (routingResult.NeedsVaultEnrichment)
+        {
+            vaultQuery = routingResult.VaultSearchQuery ?? text;
+
+            // Try both the router's vault query AND the original text for date detection
+            var translated = _dateTranslator.TranslateQuery(vaultQuery, DateTimeOffset.UtcNow);
+            startDate = translated.StartDate;
+            endDate = translated.EndDate;
+
+            // If no date range found in vault query, try the original text
+            if (!startDate.HasValue && !endDate.HasValue)
+            {
+                translated = _dateTranslator.TranslateQuery(text, DateTimeOffset.UtcNow);
+                startDate = translated.StartDate;
+                endDate = translated.EndDate;
+            }
+
+            _logger.LogInformation(
+                "Vault enrichment: query={Query}, originalText={Text}, dateRange={Start} to {End}",
+                vaultQuery, text, startDate, endDate);
+        }
+
         switch (routingResult.Skill)
         {
             case ButlerSkill.Motivation:
-                await HandleMotivationAsync(bot, chatId, userQuery: text, ct);
+                await HandleMotivationWithEnrichmentAsync(bot, chatId, text, vaultQuery, startDate, endDate, ct);
                 break;
             case ButlerSkill.Activities:
-                await HandleActivitiesAsync(bot, chatId, ct);
+                await HandleActivitiesWithEnrichmentAsync(bot, chatId, text, vaultQuery, startDate, endDate, ct);
                 break;
             case ButlerSkill.DrawingReference:
                 if (!DrawingReferenceSkillExecutor.TryExtractSubject(text, out var extracted))
@@ -451,18 +494,88 @@ public sealed class TextMessageHandler : ITextMessageHandler
                 await HandleAddEventAsync(bot, chatId, eventText, ct);
                 break;
             case ButlerSkill.VaultSearch:
-                var searchQuery = routingResult.VaultSearchQuery ?? text;
-                await HandleVaultSearchAsync(bot, chatId, searchQuery, ct);
+                // If we have a date range (temporal query like "what did I do last week?"),
+                // route to summary with enrichment instead of raw semantic search
+                if (startDate.HasValue && endDate.HasValue)
+                {
+                    await HandleSummaryWithEnrichmentAsync(bot, chatId, weekly: false, vaultQuery, startDate, endDate, ct);
+                }
+                else
+                {
+                    var searchQuery = routingResult.VaultSearchQuery ?? text;
+                    await HandleVaultSearchAsync(bot, chatId, searchQuery, ct);
+                }
                 break;
             case ButlerSkill.DailySummary:
-                await HandleSummaryAsync(bot, chatId, weekly: false, ct);
+                await HandleSummaryWithEnrichmentAsync(bot, chatId, weekly: false, vaultQuery, startDate, endDate, ct);
                 break;
             case ButlerSkill.WeeklySummary:
-                await HandleSummaryAsync(bot, chatId, weekly: true, ct);
+                await HandleSummaryWithEnrichmentAsync(bot, chatId, weekly: true, vaultQuery, startDate, endDate, ct);
                 break;
             default:
-                await HandleSummaryAsync(bot, chatId, weekly: false, ct);
+                await HandleSummaryWithEnrichmentAsync(bot, chatId, weekly: false, vaultQuery, startDate, endDate, ct);
                 break;
+        }
+    }
+
+    private async Task HandleSummaryWithEnrichmentAsync(
+        ITelegramBotClient bot,
+        long chatId,
+        bool weekly,
+        string? vaultQuery,
+        DateOnly? startDate,
+        DateOnly? endDate,
+        CancellationToken ct)
+    {
+        await SendWithKeyboardAsync(bot, chatId, weekly ? "Generating weekly summary..." : "Generating summary...", ct);
+        try
+        {
+            var taskName = weekly ? "on-demand-weekly" : "on-demand-daily";
+            var summary = await _summaryExecutor.ExecuteAsync(weekly, taskName, vaultQuery, startDate, endDate, ct);
+            if (string.IsNullOrWhiteSpace(summary)) summary = "No summary available.";
+
+            await bot.SendTextMessageAsync(chatId, TruncateForTelegram(summary),
+                replyMarkup: KeyboardFactory.BuildSummaryRefreshKeyboard(weekly),
+                cancellationToken: ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Host shutting down
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to generate summary");
+            await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), ct);
+        }
+    }
+
+    private async Task HandleMotivationWithEnrichmentAsync(
+        ITelegramBotClient bot,
+        long chatId,
+        string userQuery,
+        string? vaultQuery,
+        DateOnly? startDate,
+        DateOnly? endDate,
+        CancellationToken ct)
+    {
+        await SendWithKeyboardAsync(bot, chatId, "Generating motivation...", ct);
+        try
+        {
+            var result = await _motivationExecutor.ExecuteAsync(userQuery, vaultQuery, startDate, endDate, ct);
+            if (string.IsNullOrWhiteSpace(result)) result = "No motivation available.";
+
+            await bot.SendTextMessageAsync(chatId, TruncateForTelegram(result),
+                replyMarkup: KeyboardFactory.BuildMotivationRefreshKeyboard(),
+                cancellationToken: ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Host shutting down
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to generate motivation");
+            await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), ct);
         }
     }
 

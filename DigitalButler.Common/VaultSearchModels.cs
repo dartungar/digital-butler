@@ -118,3 +118,23 @@ public class VaultSearchOptions
     public int TopK { get; set; } = 5;
     public string EmbeddingModel { get; set; } = "text-embedding-3-small";
 }
+
+/// <summary>
+/// Citation for an Obsidian note used in a response.
+/// </summary>
+public class ObsidianCitation
+{
+    public string Title { get; set; } = string.Empty;
+    public string FilePath { get; set; } = string.Empty;
+    public DateOnly? NoteDate { get; set; }
+}
+
+/// <summary>
+/// Result of vault enrichment for a skill.
+/// </summary>
+public class VaultEnrichmentResult
+{
+    public List<ContextItem> ContextItems { get; set; } = new();
+    public List<ObsidianCitation> Citations { get; set; } = new();
+    public bool HasResults => ContextItems.Count > 0;
+}

@@ -1,6 +1,7 @@
 using DigitalButler.Common;
 using DigitalButler.Context;
 using DigitalButler.Skills;
+using DigitalButler.Skills.VaultSearch;
 using Microsoft.Extensions.Logging;
 
 namespace DigitalButler.Telegram.Skills;
@@ -11,6 +12,7 @@ public sealed class MotivationSkillExecutor : IMotivationSkillExecutor
     private readonly SkillInstructionService _skillInstructionService;
     private readonly ISummarizationService _summarizer;
     private readonly IAiContextAugmenter _aiContext;
+    private readonly IVaultEnrichmentService _vaultEnrichment;
     private readonly TimeZoneService _tzService;
     private readonly ILogger<MotivationSkillExecutor> _logger;
 
@@ -19,6 +21,7 @@ public sealed class MotivationSkillExecutor : IMotivationSkillExecutor
         SkillInstructionService skillInstructionService,
         ISummarizationService summarizer,
         IAiContextAugmenter aiContext,
+        IVaultEnrichmentService vaultEnrichment,
         TimeZoneService tzService,
         ILogger<MotivationSkillExecutor> logger)
     {
@@ -26,18 +29,49 @@ public sealed class MotivationSkillExecutor : IMotivationSkillExecutor
         _skillInstructionService = skillInstructionService;
         _summarizer = summarizer;
         _aiContext = aiContext;
+        _vaultEnrichment = vaultEnrichment;
         _tzService = tzService;
         _logger = logger;
     }
 
-    public async Task<string> ExecuteAsync(string? userQuery, CancellationToken ct)
+    public Task<string> ExecuteAsync(string? userQuery, CancellationToken ct)
+    {
+        return ExecuteAsync(userQuery, vaultQuery: null, startDate: null, endDate: null, ct);
+    }
+
+    public async Task<string> ExecuteAsync(
+        string? userQuery,
+        string? vaultQuery,
+        DateOnly? startDate,
+        DateOnly? endDate,
+        CancellationToken ct)
     {
         var tz = await _tzService.GetTimeZoneInfoAsync(ct);
         var items = await _contextService.GetRelevantAsync(daysBack: 30, take: 250, ct: ct);
+        var citations = new List<ObsidianCitation>();
 
         var cfg = await GetSkillConfigAsync(ct);
         var allowedMask = SkillContextDefaults.ResolveSourcesMask(ButlerSkill.Motivation, cfg?.ContextSourcesMask ?? -1);
         items = items.Where(x => ContextSourceMask.Contains(allowedMask, x.Source)).ToList();
+
+        // Add vault enrichment if requested
+        if (!string.IsNullOrWhiteSpace(vaultQuery) || (startDate.HasValue && endDate.HasValue))
+        {
+            try
+            {
+                var enrichment = await _vaultEnrichment.EnrichAsync(vaultQuery, startDate, endDate, ct);
+                if (enrichment.HasResults)
+                {
+                    items.AddRange(enrichment.ContextItems);
+                    citations.AddRange(enrichment.Citations);
+                    _logger.LogInformation("Added {Count} items from vault enrichment for motivation", enrichment.ContextItems.Count);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to enrich motivation with vault context");
+            }
+        }
 
         if (cfg?.EnableAiContext == true)
         {
@@ -58,8 +92,16 @@ public sealed class MotivationSkillExecutor : IMotivationSkillExecutor
 
         // Motivation should be driven by Personal context and per-skill instructions only.
         var instructionsBySource = new Dictionary<ContextSource, string>();
-        var prompt = BuildSkillPrompt(userQuery, cfg?.Content);
-        return await _summarizer.SummarizeAsync(items, instructionsBySource, "motivation", prompt, ct);
+        var prompt = BuildSkillPrompt(userQuery, cfg?.Content, citations.Count > 0);
+        var result = await _summarizer.SummarizeAsync(items, instructionsBySource, "motivation", prompt, ct);
+
+        // Append citations if any
+        if (citations.Count > 0)
+        {
+            result += _vaultEnrichment.FormatCitations(citations);
+        }
+
+        return result;
     }
 
     private async Task<SkillInstruction?> GetSkillConfigAsync(CancellationToken ct)
@@ -68,7 +110,7 @@ public sealed class MotivationSkillExecutor : IMotivationSkillExecutor
         return dict.TryGetValue(ButlerSkill.Motivation, out var v) ? v : null;
     }
 
-    private static string BuildSkillPrompt(string? userQuery, string? custom)
+    private static string BuildSkillPrompt(string? userQuery, string? custom, bool hasVaultContext = false)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("Skill: motivation");
@@ -85,6 +127,13 @@ public sealed class MotivationSkillExecutor : IMotivationSkillExecutor
         else
         {
             sb.AppendLine("Write a short motivational message grounded in Personal context items.");
+        }
+
+        if (hasVaultContext)
+        {
+            sb.AppendLine();
+            sb.AppendLine("IMPORTANT: Use insights from the Obsidian notes provided as context to personalize your message.");
+            sb.AppendLine("Reference specific achievements, progress, or themes from the notes when relevant.");
         }
 
         sb.AppendLine();

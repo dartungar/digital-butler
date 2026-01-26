@@ -12,16 +12,47 @@ public interface ISkillExecutor
 public interface ISummarySkillExecutor
 {
     Task<string> ExecuteAsync(bool weekly, string taskName, CancellationToken ct);
+
+    /// <summary>
+    /// Executes the summary skill with optional vault enrichment.
+    /// </summary>
+    Task<string> ExecuteAsync(
+        bool weekly,
+        string taskName,
+        string? vaultQuery,
+        DateOnly? startDate,
+        DateOnly? endDate,
+        CancellationToken ct);
 }
 
 public interface IMotivationSkillExecutor
 {
     Task<string> ExecuteAsync(string? userQuery, CancellationToken ct);
+
+    /// <summary>
+    /// Executes the motivation skill with optional vault enrichment.
+    /// </summary>
+    Task<string> ExecuteAsync(
+        string? userQuery,
+        string? vaultQuery,
+        DateOnly? startDate,
+        DateOnly? endDate,
+        CancellationToken ct);
 }
 
 public interface IActivitiesSkillExecutor
 {
     Task<string> ExecuteAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Executes the activities skill with optional vault enrichment.
+    /// </summary>
+    Task<string> ExecuteAsync(
+        string? userQuery,
+        string? vaultQuery,
+        DateOnly? startDate,
+        DateOnly? endDate,
+        CancellationToken ct);
 }
 
 public interface IDrawingReferenceSkillExecutor

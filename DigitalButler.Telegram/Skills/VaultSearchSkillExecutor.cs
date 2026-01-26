@@ -8,13 +8,16 @@ namespace DigitalButler.Telegram.Skills;
 public sealed class VaultSearchSkillExecutor : IVaultSearchSkillExecutor
 {
     private readonly IVaultSearchService _searchService;
+    private readonly IVaultEnrichmentService _vaultEnrichment;
     private readonly ILogger<VaultSearchSkillExecutor> _logger;
 
     public VaultSearchSkillExecutor(
         IVaultSearchService searchService,
+        IVaultEnrichmentService vaultEnrichment,
         ILogger<VaultSearchSkillExecutor> logger)
     {
         _searchService = searchService;
+        _vaultEnrichment = vaultEnrichment;
         _logger = logger;
     }
 
@@ -44,6 +47,7 @@ public sealed class VaultSearchSkillExecutor : IVaultSearchSkillExecutor
         sb.AppendLine($"Found {results.Count} relevant note(s) for \"{query}\":");
         sb.AppendLine();
 
+        var citations = new List<ObsidianCitation>();
         foreach (var result in results)
         {
             var title = result.Title ?? Path.GetFileNameWithoutExtension(result.FilePath);
@@ -60,12 +64,29 @@ public sealed class VaultSearchSkillExecutor : IVaultSearchSkillExecutor
             }
 
             sb.AppendLine();
+
+            citations.Add(new ObsidianCitation
+            {
+                Title = title,
+                FilePath = result.FilePath,
+                NoteDate = TryParseDateFromPath(result.FilePath)
+            });
         }
 
-        // Add obsidian link hint
-        sb.AppendLine("_Tip: Open notes in Obsidian using obsidian://open?vault=YourVault&file=path_");
+        // Add clickable Obsidian links
+        sb.Append(_vaultEnrichment.FormatCitations(citations, maxCitations: 10));
 
         return sb.ToString().Trim();
+    }
+
+    private static DateOnly? TryParseDateFromPath(string filePath)
+    {
+        var fileName = Path.GetFileNameWithoutExtension(filePath);
+        if (DateOnly.TryParse(fileName, out var date))
+        {
+            return date;
+        }
+        return null;
     }
 
     public async Task<string> GetStatsAsync(CancellationToken ct)

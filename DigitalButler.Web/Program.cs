@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Authorization;
 using System.Security.Cryptography;
 using System.Text;
 using DigitalButler.Telegram;
+using DigitalButler.Telegram.Skills;
 using DigitalButler.Web;
 using System.IO;
 using System.Text.RegularExpressions;
@@ -124,6 +125,7 @@ MapEnv(envOverrides, "GMAIL_MAX_MESSAGES_DEFAULT", "Gmail:MaxMessagesDefault");
 MapEnv(envOverrides, "OBSIDIAN_VAULT_PATH", "Obsidian:VaultPath");
 MapEnv(envOverrides, "OBSIDIAN_DAILY_NOTES_PATTERN", "Obsidian:DailyNotesPattern");
 MapEnv(envOverrides, "OBSIDIAN_LOOKBACK_DAYS", "Obsidian:LookbackDays");
+MapEnv(envOverrides, "OBSIDIAN_VAULT_NAME", "Obsidian:VaultName");
 
 // Vault search env vars
 MapEnv(envOverrides, "OBSIDIAN_SEARCH_ENABLED", "VaultSearch:Enabled");
@@ -235,6 +237,7 @@ builder.Services.AddScoped<INoteChunker, NoteChunker>();
 builder.Services.AddScoped<IDateQueryTranslator, DateQueryTranslator>();
 builder.Services.AddScoped<IVaultIndexer, VaultIndexer>();
 builder.Services.AddScoped<IVaultSearchService, VaultSearchService>();
+builder.Services.AddScoped<IVaultEnrichmentService, VaultEnrichmentService>();
 
 // Context updater registry - allows lookup by source
 builder.Services.AddScoped<IContextUpdaterRegistry, ContextUpdaterRegistry>();
