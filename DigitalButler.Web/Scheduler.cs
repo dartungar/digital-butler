@@ -4,6 +4,7 @@ using DigitalButler.Data.Repositories;
 using DigitalButler.Skills;
 using DigitalButler.Skills.VaultSearch;
 using Telegram.Bot;
+using Telegram.Bot.Types.Enums;
 
 namespace DigitalButler.Web;
 
@@ -271,7 +272,15 @@ public class SchedulerService : BackgroundService
         var summary = await summarizer.SummarizeAsync(items, instructionsBySource, taskName, prompt, ct);
         if (_bot != null && !string.IsNullOrWhiteSpace(chatId))
         {
-            await _bot.SendTextMessageAsync(chatId, summary, cancellationToken: ct);
+            try
+            {
+                await _bot.SendTextMessageAsync(chatId, summary, parseMode: ParseMode.Markdown, cancellationToken: ct);
+            }
+            catch (global::Telegram.Bot.Exceptions.ApiRequestException ex) when (ex.Message.Contains("can't parse entities", StringComparison.OrdinalIgnoreCase))
+            {
+                // Markdown parsing failed, retry without parsing
+                await _bot.SendTextMessageAsync(chatId, summary, cancellationToken: ct);
+            }
             _logger.LogInformation("Sent {TaskName} to chat {ChatId}", taskName, chatId);
         }
         else

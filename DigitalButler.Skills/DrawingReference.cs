@@ -79,7 +79,7 @@ public sealed class UnsplashDrawingReferenceService : IDrawingReferenceService
         var query = subject.Trim();
         var url = "https://api.unsplash.com/search/photos" +
                   "?query=" + WebUtility.UrlEncode(query) +
-                  "&per_page=1" +
+                  "&per_page=30" +
                   "&content_filter=high" +
                   "&orientation=portrait";
 
@@ -103,16 +103,23 @@ public sealed class UnsplashDrawingReferenceService : IDrawingReferenceService
             return null;
         }
 
-        var first = results.EnumerateArray().FirstOrDefault();
-        if (first.ValueKind != JsonValueKind.Object)
+        var resultsArray = results.EnumerateArray().ToArray();
+        if (resultsArray.Length == 0)
         {
             return null;
         }
 
-        var imageUrl = first.GetProperty("urls").GetProperty("regular").GetString();
-        var photoPageUrl = first.GetProperty("links").GetProperty("html").GetString();
-        var photographerName = first.GetProperty("user").GetProperty("name").GetString();
-        var photographerProfileUrl = first.GetProperty("user").GetProperty("links").GetProperty("html").GetString();
+        // Pick a random result to provide variety when requesting "different image"
+        var selected = resultsArray[Random.Shared.Next(resultsArray.Length)];
+        if (selected.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var imageUrl = selected.GetProperty("urls").GetProperty("regular").GetString();
+        var photoPageUrl = selected.GetProperty("links").GetProperty("html").GetString();
+        var photographerName = selected.GetProperty("user").GetProperty("name").GetString();
+        var photographerProfileUrl = selected.GetProperty("user").GetProperty("links").GetProperty("html").GetString();
 
         if (string.IsNullOrWhiteSpace(imageUrl) || string.IsNullOrWhiteSpace(photoPageUrl) || string.IsNullOrWhiteSpace(photographerName) || string.IsNullOrWhiteSpace(photographerProfileUrl))
         {

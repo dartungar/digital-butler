@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Telegram.Bot;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.Enums;
 
 namespace DigitalButler.Telegram.Handlers;
 
@@ -234,9 +235,8 @@ public sealed class TextMessageHandler : ITextMessageHandler
             var summary = await _summaryExecutor.ExecuteAsync(weekly, taskName, ct);
             if (string.IsNullOrWhiteSpace(summary)) summary = "No summary available.";
 
-            await bot.SendTextMessageAsync(chatId, TruncateForTelegram(summary),
-                replyMarkup: KeyboardFactory.BuildSummaryRefreshKeyboard(weekly),
-                cancellationToken: ct);
+            await SendWithMarkdownFallbackAsync(bot, chatId, TruncateForTelegram(summary),
+                KeyboardFactory.BuildSummaryRefreshKeyboard(weekly), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -257,9 +257,8 @@ public sealed class TextMessageHandler : ITextMessageHandler
             var result = await _motivationExecutor.ExecuteAsync(userQuery, ct);
             if (string.IsNullOrWhiteSpace(result)) result = "No motivation available.";
 
-            await bot.SendTextMessageAsync(chatId, TruncateForTelegram(result),
-                replyMarkup: KeyboardFactory.BuildMotivationRefreshKeyboard(),
-                cancellationToken: ct);
+            await SendWithMarkdownFallbackAsync(bot, chatId, TruncateForTelegram(result),
+                KeyboardFactory.BuildMotivationRefreshKeyboard(), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -292,9 +291,8 @@ public sealed class TextMessageHandler : ITextMessageHandler
             var result = await _activitiesExecutor.ExecuteAsync(userQuery, vaultQuery, startDate, endDate, ct);
             if (string.IsNullOrWhiteSpace(result)) result = "No activities available.";
 
-            await bot.SendTextMessageAsync(chatId, TruncateForTelegram(result),
-                replyMarkup: KeyboardFactory.BuildActivitiesRefreshKeyboard(),
-                cancellationToken: ct);
+            await SendWithMarkdownFallbackAsync(bot, chatId, TruncateForTelegram(result),
+                KeyboardFactory.BuildActivitiesRefreshKeyboard(), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -534,9 +532,8 @@ public sealed class TextMessageHandler : ITextMessageHandler
             var summary = await _summaryExecutor.ExecuteAsync(weekly, taskName, vaultQuery, startDate, endDate, ct);
             if (string.IsNullOrWhiteSpace(summary)) summary = "No summary available.";
 
-            await bot.SendTextMessageAsync(chatId, TruncateForTelegram(summary),
-                replyMarkup: KeyboardFactory.BuildSummaryRefreshKeyboard(weekly),
-                cancellationToken: ct);
+            await SendWithMarkdownFallbackAsync(bot, chatId, TruncateForTelegram(summary),
+                KeyboardFactory.BuildSummaryRefreshKeyboard(weekly), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -564,9 +561,8 @@ public sealed class TextMessageHandler : ITextMessageHandler
             var result = await _motivationExecutor.ExecuteAsync(userQuery, vaultQuery, startDate, endDate, ct);
             if (string.IsNullOrWhiteSpace(result)) result = "No motivation available.";
 
-            await bot.SendTextMessageAsync(chatId, TruncateForTelegram(result),
-                replyMarkup: KeyboardFactory.BuildMotivationRefreshKeyboard(),
-                cancellationToken: ct);
+            await SendWithMarkdownFallbackAsync(bot, chatId, TruncateForTelegram(result),
+                KeyboardFactory.BuildMotivationRefreshKeyboard(), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -582,6 +578,27 @@ public sealed class TextMessageHandler : ITextMessageHandler
     private static Task SendWithKeyboardAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)
     {
         return bot.SendTextMessageAsync(chatId, text, replyMarkup: KeyboardFactory.BuildMainReplyKeyboard(), cancellationToken: ct);
+    }
+
+    /// <summary>
+    /// Sends a message with Markdown parsing, falling back to plain text if parsing fails.
+    /// </summary>
+    private static async Task SendWithMarkdownFallbackAsync(
+        ITelegramBotClient bot,
+        long chatId,
+        string text,
+        global::Telegram.Bot.Types.ReplyMarkups.IReplyMarkup? replyMarkup,
+        CancellationToken ct)
+    {
+        try
+        {
+            await bot.SendTextMessageAsync(chatId, text, parseMode: ParseMode.Markdown, replyMarkup: replyMarkup, cancellationToken: ct);
+        }
+        catch (global::Telegram.Bot.Exceptions.ApiRequestException ex) when (ex.Message.Contains("can't parse entities", StringComparison.OrdinalIgnoreCase))
+        {
+            // Markdown parsing failed, retry without parsing
+            await bot.SendTextMessageAsync(chatId, text, replyMarkup: replyMarkup, cancellationToken: ct);
+        }
     }
 
     private static string TruncateForTelegram(string text, int maxLen = 3500)

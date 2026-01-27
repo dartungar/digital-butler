@@ -124,6 +124,9 @@ public static class ContextSourceMask
     public static int For(ContextSource source)
         => 1 << (int)source;
 
+    public static int For(params ContextSource[] sources)
+        => sources.Aggregate(0, (mask, s) => mask | (1 << (int)s));
+
     public static int All()
         => Enum.GetValues<ContextSource>().Aggregate(0, (mask, s) => mask | For(s));
 
@@ -138,8 +141,8 @@ public static class SkillContextDefaults
         {
             ButlerSkill.DailySummary => ContextSourceMask.All(),
             ButlerSkill.WeeklySummary => ContextSourceMask.All(),
-            ButlerSkill.Motivation => ContextSourceMask.For(ContextSource.Personal),
-            ButlerSkill.Activities => ContextSourceMask.For(ContextSource.Personal),
+            ButlerSkill.Motivation => ContextSourceMask.For(ContextSource.Personal, ContextSource.Obsidian),
+            ButlerSkill.Activities => ContextSourceMask.For(ContextSource.Personal, ContextSource.Obsidian),
             ButlerSkill.CalendarEvent => 0, // No context sources needed for event creation
             _ => ContextSourceMask.All()
         };

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Telegram.Bot;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.Enums;
 
 namespace DigitalButler.Telegram.Handlers;
 
@@ -131,7 +132,8 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
                 await SendProcessingAndExecuteAsync(bot, chatId, "Generating motivation...", async () =>
                 {
                     var result = await _motivationExecutor.ExecuteAsync(userQuery: null, ct);
-                    return (TruncateForTelegram(result ?? "No motivation available."), KeyboardFactory.BuildMotivationRefreshKeyboard());
+                    if (string.IsNullOrWhiteSpace(result)) result = "No motivation available.";
+                    return (TruncateForTelegram(result), KeyboardFactory.BuildMotivationRefreshKeyboard());
                 }, ct);
                 break;
 
@@ -139,7 +141,8 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
                 await SendProcessingAndExecuteAsync(bot, chatId, "Generating activities...", async () =>
                 {
                     var result = await _activitiesExecutor.ExecuteAsync(ct);
-                    return (TruncateForTelegram(result ?? "No activities available."), KeyboardFactory.BuildActivitiesRefreshKeyboard());
+                    if (string.IsNullOrWhiteSpace(result)) result = "No activities available.";
+                    return (TruncateForTelegram(result), KeyboardFactory.BuildActivitiesRefreshKeyboard());
                 }, ct);
                 break;
 
@@ -180,7 +183,8 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
         await SendProcessingAndExecuteAsync(bot, chatId, "Generating motivation...", async () =>
         {
             var result = await _motivationExecutor.ExecuteAsync(userQuery: null, ct);
-            return (TruncateForTelegram(result ?? "No motivation available."), KeyboardFactory.BuildMotivationRefreshKeyboard());
+            if (string.IsNullOrWhiteSpace(result)) result = "No motivation available.";
+            return (TruncateForTelegram(result), KeyboardFactory.BuildMotivationRefreshKeyboard());
         }, ct);
     }
 
@@ -191,7 +195,8 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
         await SendProcessingAndExecuteAsync(bot, chatId, "Generating activities...", async () =>
         {
             var result = await _activitiesExecutor.ExecuteAsync(ct);
-            return (TruncateForTelegram(result ?? "No activities available."), KeyboardFactory.BuildActivitiesRefreshKeyboard());
+            if (string.IsNullOrWhiteSpace(result)) result = "No activities available.";
+            return (TruncateForTelegram(result), KeyboardFactory.BuildActivitiesRefreshKeyboard());
         }, ct);
     }
 
@@ -356,7 +361,7 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
         try
         {
             var (text, keyboard) = await execute();
-            await bot.SendTextMessageAsync(chatId, text, replyMarkup: keyboard, cancellationToken: ct);
+            await SendWithMarkdownFallbackAsync(bot, chatId, text, keyboard, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -366,6 +371,27 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
         {
             _logger.LogWarning(ex, "Failed to execute callback action");
             await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), ct);
+        }
+    }
+
+    /// <summary>
+    /// Sends a message with Markdown parsing, falling back to plain text if parsing fails.
+    /// </summary>
+    private static async Task SendWithMarkdownFallbackAsync(
+        ITelegramBotClient bot,
+        long chatId,
+        string text,
+        global::Telegram.Bot.Types.ReplyMarkups.IReplyMarkup? replyMarkup,
+        CancellationToken ct)
+    {
+        try
+        {
+            await bot.SendTextMessageAsync(chatId, text, parseMode: ParseMode.Markdown, replyMarkup: replyMarkup, cancellationToken: ct);
+        }
+        catch (global::Telegram.Bot.Exceptions.ApiRequestException ex) when (ex.Message.Contains("can't parse entities", StringComparison.OrdinalIgnoreCase))
+        {
+            // Markdown parsing failed, retry without parsing
+            await bot.SendTextMessageAsync(chatId, text, replyMarkup: replyMarkup, cancellationToken: ct);
         }
     }
 
