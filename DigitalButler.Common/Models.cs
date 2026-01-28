@@ -397,4 +397,16 @@ public class ObsidianAnalysisResult
 
     // Comparison period info
     public string? ComparisonPeriodLabel { get; set; }  // "yesterday", "last week", "last 4 weeks avg"
+
+    // Today's planned tasks (from today's daily note)
+    public List<string> TodayPendingTasks { get; set; } = new();
+    public List<string> TodayStarredTasks { get; set; } = new();
+    public List<string> TodayAttentionTasks { get; set; } = new();
+    public bool HasTodayData { get; set; }
+
+    // Stats-based alerts for "heads up" section
+    public List<string> StatsAlerts { get; set; } = new();
+
+    // Yesterday's journal content for reflection
+    public string? YesterdayJournal { get; set; }
 }

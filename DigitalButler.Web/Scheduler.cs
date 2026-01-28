@@ -3,6 +3,7 @@ using DigitalButler.Common;
 using DigitalButler.Data.Repositories;
 using DigitalButler.Skills;
 using DigitalButler.Skills.VaultSearch;
+using DigitalButler.Telegram.Skills;
 using Telegram.Bot;
 using Telegram.Bot.Types.Enums;
 
@@ -232,44 +233,11 @@ public class SchedulerService : BackgroundService
 
     private async Task SendSummaryAsync(IServiceProvider serviceProvider, ContextService contextService, InstructionService instructionService, SkillInstructionService skillInstructionService, ISummarizationService summarizer, IAiContextAugmenter aiContext, TimeZoneInfo tz, string taskName, string? chatId, CancellationToken ct)
     {
-        var (start, end) = taskName switch
-        {
-            "daily-summary" => TimeWindowHelper.GetDailyWindow(tz),
-            "weekly-summary" => TimeWindowHelper.GetWeeklyWindow(tz),
-            _ => TimeWindowHelper.GetDailyWindow(tz)
-        };
+        // Use SummarySkillExecutor to ensure consistent behavior with manual /daily and /weekly commands
+        var summaryExecutor = serviceProvider.GetRequiredService<ISummarySkillExecutor>();
+        var weekly = taskName == "weekly-summary";
+        var summary = await summaryExecutor.ExecuteAsync(weekly, taskName, ct);
 
-        var items = await contextService.GetForWindowAsync(start, end, take: taskName == "weekly-summary" ? 300 : 200, ct: ct);
-
-        var skill = taskName == "weekly-summary" ? ButlerSkill.WeeklySummary : ButlerSkill.DailySummary;
-        var cfg = await skillInstructionService.GetFullBySkillsAsync(new[] { skill }, ct);
-        cfg.TryGetValue(skill, out var summaryCfg);
-        var allowedMask = SkillContextDefaults.ResolveSourcesMask(skill, summaryCfg?.ContextSourcesMask ?? -1);
-        items = items.Where(x => ContextSourceMask.Contains(allowedMask, x.Source)).ToList();
-
-        if (summaryCfg?.EnableAiContext == true)
-        {
-            var snippet = await aiContext.GenerateAsync(skill, items, taskName, ct);
-            if (!string.IsNullOrWhiteSpace(snippet))
-            {
-                items.Add(new ContextItem
-                {
-                    Source = ContextSource.Personal,
-                    Title = "AI self-thought",
-                    Body = snippet.Trim(),
-                    IsTimeless = true,
-                    CreatedAt = DateTimeOffset.UtcNow,
-                    UpdatedAt = DateTimeOffset.UtcNow
-                });
-            }
-        }
-
-        var sources = items.Select(x => x.Source).Distinct().ToArray();
-        var instructionsBySource = await instructionService.GetBySourcesAsync(sources, ct);
-        var custom = summaryCfg?.Content;
-        var period = taskName.StartsWith("weekly", StringComparison.OrdinalIgnoreCase) ? "weekly" : "daily";
-        var prompt = $"Skill: summary\nPeriod: {period}\nOutput a concise agenda with actionable highlights.\n" + (string.IsNullOrWhiteSpace(custom) ? string.Empty : "\n" + custom.Trim());
-        var summary = await summarizer.SummarizeAsync(items, instructionsBySource, taskName, prompt, ct);
         if (_bot != null && !string.IsNullOrWhiteSpace(chatId))
         {
             try
@@ -289,25 +257,6 @@ public class SchedulerService : BackgroundService
                 taskName,
                 _bot == null ? "null" : "available",
                 string.IsNullOrWhiteSpace(chatId) ? "missing" : "set");
-        }
-
-        // Store weekly summary for future comparisons
-        if (taskName == "weekly-summary")
-        {
-            try
-            {
-                var obsidianAnalysis = serviceProvider.GetRequiredService<IObsidianAnalysisService>();
-                var weeklyResult = await obsidianAnalysis.AnalyzeWeeklyAsync(tz, ct);
-                if (weeklyResult != null)
-                {
-                    await obsidianAnalysis.StoreWeeklySummaryAsync(weeklyResult, summary, ct);
-                    _logger.LogInformation("Stored weekly Obsidian summary for week starting {WeekStart}", weeklyResult.PeriodStart);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to store weekly Obsidian summary");
-            }
         }
     }
 }

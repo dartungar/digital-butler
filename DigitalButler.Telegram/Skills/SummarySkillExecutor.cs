@@ -95,7 +95,8 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
             }
         }
 
-        // Add Obsidian analysis as context (only if no specific date range was provided)
+        // Get Obsidian analysis (only if no specific date range was provided)
+        // Note: Analysis is included directly in the prompt, not as a context item, to avoid separate "Obsidian" section
         string? obsidianAnalysisText = null;
         ObsidianAnalysisResult? obsidianResult = null;
         if (!startDate.HasValue || !endDate.HasValue)
@@ -109,15 +110,6 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
                 if (obsidianResult != null)
                 {
                     obsidianAnalysisText = _obsidianAnalysis.FormatAnalysisForPrompt(obsidianResult);
-                    items.Add(new ContextItem
-                    {
-                        Source = ContextSource.Obsidian,
-                        Title = weekly ? "Weekly Obsidian Analysis" : "Daily Obsidian Analysis",
-                        Body = obsidianAnalysisText,
-                        IsTimeless = true,
-                        CreatedAt = DateTimeOffset.UtcNow,
-                        UpdatedAt = DateTimeOffset.UtcNow
-                    });
                 }
             }
             catch (Exception ex)
@@ -147,7 +139,7 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         var instructionsBySource = await _instructionService.GetBySourcesAsync(sources, ct);
         var skillInstructions = cfg?.Content;
         var period = weekly ? "weekly" : "daily";
-        var result = await _summarizer.SummarizeAsync(items, instructionsBySource, taskName, BuildSkillPrompt(period, skillInstructions, obsidianAnalysisText != null), ct);
+        var result = await _summarizer.SummarizeAsync(items, instructionsBySource, taskName, BuildSkillPrompt(period, skillInstructions, obsidianAnalysisText), ct);
 
         // Append citations if any
         if (citations.Count > 0)
@@ -190,33 +182,55 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         return await _contextService.GetForWindowAsync(start, end, take: 500, ct: ct);
     }
 
-    private static string BuildSkillPrompt(string period, string? custom, bool hasObsidianAnalysis = false)
+    private static string BuildSkillPrompt(string period, string? custom, string? obsidianAnalysis = null)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("Skill: summary");
         sb.AppendLine($"Period: {period}");
-        sb.AppendLine("Output a concise summary of what happened during this period.");
-        sb.AppendLine("Focus on facts and events. Do NOT include action items, advice, recommendations, or suggestions.");
 
-        if (hasObsidianAnalysis)
+        var hasObsidianAnalysis = !string.IsNullOrWhiteSpace(obsidianAnalysis);
+
+        if (hasObsidianAnalysis && period == "daily")
         {
             sb.AppendLine();
-            if (period == "daily")
-            {
-                sb.AppendLine("Include relevant insights from Obsidian daily notes:");
-                sb.AppendLine("- Energy/motivation/stress levels if notable");
-                sb.AppendLine("- Habit counts (soul, body, indulging)");
-                sb.AppendLine("- Completed tasks");
-                sb.AppendLine("- Key themes from journal entries");
-            }
-            else
-            {
-                sb.AppendLine("Include relevant insights from Obsidian weekly analysis:");
-                sb.AppendLine("- Weekly trends in energy/motivation/stress");
-                sb.AppendLine("- Habit activity patterns");
-                sb.AppendLine("- Task completion progress");
-                sb.AppendLine("- Recurring themes from journal entries");
-            }
+            sb.AppendLine("IMPORTANT: Structure your daily summary with these sections:");
+            sb.AppendLine();
+            sb.AppendLine("1. ENCOURAGEMENT (1-2 sentences at the start):");
+            sb.AppendLine("   - Acknowledge specific accomplishments from YESTERDAY'S ACCOMPLISHMENTS");
+            sb.AppendLine("   - Be warm but concise");
+            sb.AppendLine();
+            sb.AppendLine("2. HEADS UP (if any alerts are present):");
+            sb.AppendLine("   - Include alerts from the HEADS UP section");
+            sb.AppendLine("   - If energy/motivation was low, suggest self-care");
+            sb.AppendLine("   - If stress was high, acknowledge it and suggest taking it easy");
+            sb.AppendLine("   - If yesterday's journal tone was negative, be supportive");
+            sb.AppendLine("   - If metrics were good, briefly celebrate");
+            sb.AppendLine();
+            sb.AppendLine("3. TODAY'S AGENDA:");
+            sb.AppendLine("   - Combine calendar events with TODAY'S PLANNED TASKS");
+            sb.AppendLine("   - Show priority [*] and attention [!] tasks prominently");
+            sb.AppendLine("   - Include pending tasks alongside calendar events");
+            sb.AppendLine();
+            sb.AppendLine("4. OTHER CONTEXT:");
+            sb.AppendLine("   - Any other relevant information (emails, personal notes)");
+            sb.AppendLine();
+            sb.AppendLine("Focus on being helpful and supportive. Keep it concise.");
+        }
+        else if (hasObsidianAnalysis && period == "weekly")
+        {
+            sb.AppendLine("Output a concise summary of what happened during this period.");
+            sb.AppendLine("Focus on facts and events.");
+            sb.AppendLine();
+            sb.AppendLine("Include relevant insights from the analysis below:");
+            sb.AppendLine("- Weekly trends in energy/motivation/stress");
+            sb.AppendLine("- Habit activity patterns");
+            sb.AppendLine("- Task completion progress");
+            sb.AppendLine("- Recurring themes from journal entries");
+        }
+        else
+        {
+            sb.AppendLine("Output a concise summary of what happened during this period.");
+            sb.AppendLine("Focus on facts and events. Do NOT include action items, advice, recommendations, or suggestions.");
         }
 
         if (!string.IsNullOrWhiteSpace(custom))
@@ -224,6 +238,15 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
             sb.AppendLine();
             sb.AppendLine(custom.Trim());
         }
+
+        // Include Obsidian analysis directly in the prompt (not as a separate context source)
+        if (hasObsidianAnalysis)
+        {
+            sb.AppendLine();
+            sb.AppendLine("=== PERSONAL DAILY NOTES DATA ===");
+            sb.AppendLine(obsidianAnalysis);
+        }
+
         return sb.ToString();
     }
 }

@@ -32,6 +32,17 @@ public sealed class ObsidianAnalysisService : IObsidianAnalysisService
     private readonly ObsidianDailyNotesRepository _dailyRepo;
     private readonly ObsidianWeeklySummaryRepository _weeklyRepo;
 
+    // Thresholds for stats alerts (on a 1-10 scale)
+    private static class MetricThresholds
+    {
+        public const int LowEnergy = 4;
+        public const int LowMotivation = 4;
+        public const int LowLifeSatisfaction = 4;
+        public const int HighStress = 7;
+        public const int HighEnergy = 8;
+        public const int HighMotivation = 8;
+    }
+
     public ObsidianAnalysisService(
         ObsidianDailyNotesRepository dailyRepo,
         ObsidianWeeklySummaryRepository weeklyRepo)
@@ -57,6 +68,22 @@ public sealed class ObsidianAnalysisService : IObsidianAnalysisService
 
         // Build current period result from yesterday's note
         var result = BuildAnalysisResult(new List<ObsidianDailyNote> { yesterdayNote }, yesterday, yesterday, isWeekly: false);
+
+        // Fetch today's note for planned tasks
+        var todayNote = await _dailyRepo.GetByDateAsync(today, ct);
+        if (todayNote != null)
+        {
+            result.HasTodayData = true;
+            result.TodayPendingTasks = todayNote.PendingTasks ?? new();
+            result.TodayStarredTasks = todayNote.StarredTasks ?? new();
+            result.TodayAttentionTasks = todayNote.AttentionTasks ?? new();
+        }
+
+        // Include yesterday's journal for reflection
+        result.YesterdayJournal = yesterdayNote.Notes;
+
+        // Generate stats alerts based on yesterday's metrics
+        result.StatsAlerts = GenerateStatsAlerts(yesterdayNote);
 
         // Calculate comparison vs day before yesterday
         if (dayBeforeYesterdayNote != null)
@@ -141,6 +168,73 @@ public sealed class ObsidianAnalysisService : IObsidianAnalysisService
 
         sb.AppendLine($"=== Obsidian Daily Notes Analysis ({analysis.PeriodStart:MMM dd} - {analysis.PeriodEnd:MMM dd}) ===");
         sb.AppendLine($"Days with data: {analysis.DaysWithData}");
+
+        // HEADS UP section - stats alerts (only for daily, placed prominently at top)
+        if (!analysis.IsWeekly && analysis.StatsAlerts.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("HEADS UP (based on yesterday's stats):");
+            foreach (var alert in analysis.StatsAlerts)
+                sb.AppendLine($"  - {alert}");
+        }
+
+        // TODAY'S PLANNED TASKS section (only for daily)
+        if (!analysis.IsWeekly && analysis.HasTodayData &&
+            (analysis.TodayStarredTasks.Count > 0 || analysis.TodayAttentionTasks.Count > 0 || analysis.TodayPendingTasks.Count > 0))
+        {
+            sb.AppendLine();
+            sb.AppendLine("TODAY'S PLANNED TASKS (from today's daily note):");
+
+            if (analysis.TodayStarredTasks.Count > 0)
+            {
+                sb.AppendLine("  Priority [*]:");
+                foreach (var task in analysis.TodayStarredTasks.Take(5))
+                    sb.AppendLine($"    - {task}");
+                if (analysis.TodayStarredTasks.Count > 5)
+                    sb.AppendLine($"    ... and {analysis.TodayStarredTasks.Count - 5} more");
+            }
+
+            if (analysis.TodayAttentionTasks.Count > 0)
+            {
+                sb.AppendLine("  Needs attention [!]:");
+                foreach (var task in analysis.TodayAttentionTasks.Take(5))
+                    sb.AppendLine($"    - {task}");
+                if (analysis.TodayAttentionTasks.Count > 5)
+                    sb.AppendLine($"    ... and {analysis.TodayAttentionTasks.Count - 5} more");
+            }
+
+            if (analysis.TodayPendingTasks.Count > 0)
+            {
+                sb.AppendLine("  Pending [ ]:");
+                foreach (var task in analysis.TodayPendingTasks.Take(10))
+                    sb.AppendLine($"    - {task}");
+                if (analysis.TodayPendingTasks.Count > 10)
+                    sb.AppendLine($"    ... and {analysis.TodayPendingTasks.Count - 10} more");
+            }
+        }
+
+        // YESTERDAY'S ACCOMPLISHMENTS section (only for daily, for encouragement)
+        if (!analysis.IsWeekly && analysis.CompletedTasksList.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("YESTERDAY'S ACCOMPLISHMENTS (for encouragement):");
+            foreach (var task in analysis.CompletedTasksList.Take(10))
+                sb.AppendLine($"  - {task}");
+            if (analysis.CompletedTasksList.Count > 10)
+                sb.AppendLine($"  ... and {analysis.CompletedTasksList.Count - 10} more completed!");
+        }
+
+        // YESTERDAY'S JOURNAL section (only for daily, for context and tone)
+        if (!analysis.IsWeekly && !string.IsNullOrWhiteSpace(analysis.YesterdayJournal))
+        {
+            sb.AppendLine();
+            sb.AppendLine("YESTERDAY'S JOURNAL (for context - note the tone):");
+            var journalTruncated = analysis.YesterdayJournal.Length > 1000
+                ? analysis.YesterdayJournal[..1000] + "..."
+                : analysis.YesterdayJournal;
+            sb.AppendLine($"  {journalTruncated}");
+        }
+
         sb.AppendLine();
 
         // Metrics with deltas
@@ -506,5 +600,57 @@ public sealed class ObsidianAnalysisService : IObsidianAnalysisService
         var thisWeekStart = GetMondayOfWeek(today);
         var lastWeekStart = thisWeekStart.AddDays(-7);
         return await _weeklyRepo.GetByWeekStartAsync(lastWeekStart, ct);
+    }
+
+    private static List<string> GenerateStatsAlerts(ObsidianDailyNote note)
+    {
+        var alerts = new List<string>();
+
+        // === METRICS-BASED ALERTS ===
+
+        // Check for low energy/motivation (concerning)
+        if (note.Energy.HasValue && note.Energy <= MetricThresholds.LowEnergy)
+            alerts.Add($"Yesterday's energy was low ({note.Energy}/10) - consider taking it easy today");
+
+        if (note.Motivation.HasValue && note.Motivation <= MetricThresholds.LowMotivation)
+            alerts.Add($"Yesterday's motivation was low ({note.Motivation}/10) - be gentle with yourself");
+
+        if (note.LifeSatisfaction.HasValue && note.LifeSatisfaction <= MetricThresholds.LowLifeSatisfaction)
+            alerts.Add($"Yesterday's life satisfaction was low ({note.LifeSatisfaction}/10)");
+
+        // Check for high stress (concerning)
+        if (note.Stress.HasValue && note.Stress >= MetricThresholds.HighStress)
+            alerts.Add($"Yesterday's stress was elevated ({note.Stress}/10) - prioritize self-care");
+
+        // Check for high energy/motivation (positive)
+        if (note.Energy.HasValue && note.Energy >= MetricThresholds.HighEnergy)
+            alerts.Add($"Yesterday's energy was high ({note.Energy}/10) - great momentum!");
+
+        if (note.Motivation.HasValue && note.Motivation >= MetricThresholds.HighMotivation)
+            alerts.Add($"Yesterday's motivation was high ({note.Motivation}/10) - keep it up!");
+
+        // === HABIT-BASED ALERTS ===
+
+        // Body activities (positive feedback for high activity)
+        if (note.BodyCount.HasValue && note.BodyCount >= 3)
+            alerts.Add($"Great physical activity yesterday ({note.BodyCount} body activities) - keep moving!");
+
+        // Soul activities (positive feedback)
+        if (note.SoulCount.HasValue && note.SoulCount >= 3)
+            alerts.Add($"Good soul nourishment yesterday ({note.SoulCount} soul activities)!");
+
+        // Meditation (positive feedback)
+        if (note.MeditationMinutes.HasValue && note.MeditationMinutes >= 15)
+            alerts.Add($"Nice meditation practice yesterday ({note.MeditationMinutes} min)!");
+
+        // Indulging (gentle suggestion if high)
+        if (note.IndulgingCount.HasValue && note.IndulgingCount >= 3)
+            alerts.Add($"Noticed some indulging yesterday ({note.IndulgingCount}) - maybe balance it out today?");
+
+        // Areas (life areas maintenance)
+        if (note.AreasCount.HasValue && note.AreasCount >= 3)
+            alerts.Add($"Good work on life areas yesterday ({note.AreasCount} activities)!");
+
+        return alerts;
     }
 }
