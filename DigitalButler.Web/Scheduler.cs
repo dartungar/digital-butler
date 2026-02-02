@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DigitalButler.Context;
 using DigitalButler.Common;
 using DigitalButler.Data.Repositories;
@@ -95,6 +96,7 @@ public class SchedulerService : BackgroundService
         var updaterRegistry = scope.ServiceProvider.GetRequiredService<IContextUpdaterRegistry>();
 
         // Run module updates based on interval (parse CronOrInterval as minutes interval)
+        var logRepo = scope.ServiceProvider.GetRequiredService<ContextUpdateLogRepository>();
         foreach (var schedule in await schedules.GetEnabledUpdateSchedulesAsync(ct))
         {
             var intervalMinutes = ParseIntervalMinutes(schedule.CronOrInterval);
@@ -103,19 +105,8 @@ public class SchedulerService : BackgroundService
                 var updater = updaterRegistry.GetUpdater(schedule.Source);
                 if (updater != null)
                 {
-                    try
-                    {
-                        await updater.UpdateAsync(ct);
-                        _logger.LogInformation("Scheduled update for {Source} completed", schedule.Source);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Scheduled update for {Source} failed", schedule.Source);
-                        if (_errorNotifier != null)
-                        {
-                            await _errorNotifier.NotifyErrorAsync($"Sync: {schedule.Source}", ex, ct);
-                        }
-                    }
+                    _logger.LogInformation("Starting scheduled update for {Source}", schedule.Source);
+                    await RunUpdaterWithLoggingAsync(updater, logRepo, "scheduled", ct);
                 }
             }
         }
@@ -123,28 +114,7 @@ public class SchedulerService : BackgroundService
         // Run vault indexing every 30 minutes (at :00 and :30)
         if (nowUtc.Minute % 30 == 0)
         {
-            try
-            {
-                var vaultIndexer = scope.ServiceProvider.GetService<IVaultIndexer>();
-                if (vaultIndexer != null)
-                {
-                    var result = await vaultIndexer.IndexVaultAsync(ct);
-                    if (result.NotesAdded > 0 || result.NotesUpdated > 0 || result.NotesRemoved > 0)
-                    {
-                        _logger.LogInformation(
-                            "Vault indexing completed: {Added} added, {Updated} updated, {Removed} removed, {Chunks} chunks",
-                            result.NotesAdded, result.NotesUpdated, result.NotesRemoved, result.ChunksCreated);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Vault indexing failed");
-                if (_errorNotifier != null)
-                {
-                    await _errorNotifier.NotifyErrorAsync("Vault indexing", ex, ct);
-                }
-            }
+            await RunVaultIndexingWithLoggingAsync(scope.ServiceProvider, logRepo, "scheduled", ct);
         }
 
         // Daily summaries
@@ -163,6 +133,9 @@ public class SchedulerService : BackgroundService
                 _logger.LogInformation("Daily summary schedule matched: {ScheduleTime} == {LocalNow:HH:mm}", sched.Time, localNow);
                 try
                 {
+                    // Run all syncs before sending daily summary
+                    _logger.LogInformation("Running pre-summary sync for daily summary");
+                    await RunPreSummarySyncAsync(scope.ServiceProvider, updaterRegistry, logRepo, ct);
                     await SendSummaryAsync(scope.ServiceProvider, contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "daily-summary", chatId, ct);
                 }
                 catch (Exception ex)
@@ -192,6 +165,9 @@ public class SchedulerService : BackgroundService
                     sched.DayOfWeek, sched.Time, localNow.DayOfWeek, localNow);
                 try
                 {
+                    // Run all syncs before sending weekly summary
+                    _logger.LogInformation("Running pre-summary sync for weekly summary");
+                    await RunPreSummarySyncAsync(scope.ServiceProvider, updaterRegistry, logRepo, ct);
                     await SendSummaryAsync(scope.ServiceProvider, contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "weekly-summary", chatId, ct);
                 }
                 catch (Exception ex)
@@ -257,6 +233,143 @@ public class SchedulerService : BackgroundService
                 taskName,
                 _bot == null ? "null" : "available",
                 string.IsNullOrWhiteSpace(chatId) ? "missing" : "set");
+        }
+    }
+
+    /// <summary>
+    /// Runs all context updaters and vault indexing before sending a summary.
+    /// This ensures fresh data is available for summary generation.
+    /// </summary>
+    private async Task RunPreSummarySyncAsync(IServiceProvider serviceProvider, IContextUpdaterRegistry updaterRegistry, ContextUpdateLogRepository logRepo, CancellationToken ct)
+    {
+        _logger.LogInformation("Pre-summary sync started");
+        var sw = Stopwatch.StartNew();
+
+        foreach (var updater in updaterRegistry.GetAll())
+        {
+            await RunUpdaterWithLoggingAsync(updater, logRepo, "pre-summary", ct);
+        }
+
+        // Also run vault indexing
+        await RunVaultIndexingWithLoggingAsync(serviceProvider, logRepo, "pre-summary", ct);
+
+        sw.Stop();
+        _logger.LogInformation("Pre-summary sync completed in {DurationMs}ms", sw.ElapsedMilliseconds);
+    }
+
+    /// <summary>
+    /// Runs a single context updater with full logging to ContextUpdateLog.
+    /// </summary>
+    private async Task RunUpdaterWithLoggingAsync(IContextUpdater updater, ContextUpdateLogRepository logRepo, string trigger, CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+        var log = new ContextUpdateLog
+        {
+            Timestamp = DateTimeOffset.UtcNow,
+            Source = updater.Source.ToString(),
+            Message = trigger
+        };
+
+        try
+        {
+            _logger.LogInformation("Starting {Trigger} update for {Source}", trigger, updater.Source);
+            await updater.UpdateAsync(ct);
+            sw.Stop();
+
+            log.Status = "Success";
+            log.DurationMs = (int)sw.ElapsedMilliseconds;
+            _logger.LogInformation("{Trigger} update for {Source} completed in {DurationMs}ms",
+                trigger, updater.Source, sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            log.Status = "Failed";
+            log.DurationMs = (int)sw.ElapsedMilliseconds;
+            log.Details = $"{ex.GetType().Name}: {ex.Message}";
+
+            _logger.LogWarning(ex, "{Trigger} update for {Source} failed after {DurationMs}ms",
+                trigger, updater.Source, sw.ElapsedMilliseconds);
+
+            if (_errorNotifier != null)
+            {
+                await _errorNotifier.NotifyErrorAsync($"Sync: {updater.Source}", ex, ct);
+            }
+        }
+
+        try
+        {
+            await logRepo.AddAsync(log, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to log context update for {Source}", updater.Source);
+        }
+    }
+
+    /// <summary>
+    /// Runs vault indexing with full logging to ContextUpdateLog.
+    /// </summary>
+    private async Task RunVaultIndexingWithLoggingAsync(IServiceProvider serviceProvider, ContextUpdateLogRepository logRepo, string trigger, CancellationToken ct)
+    {
+        var vaultIndexer = serviceProvider.GetService<IVaultIndexer>();
+        if (vaultIndexer == null)
+            return;
+
+        var sw = Stopwatch.StartNew();
+        var log = new ContextUpdateLog
+        {
+            Timestamp = DateTimeOffset.UtcNow,
+            Source = "VaultIndexing",
+            Message = trigger
+        };
+
+        try
+        {
+            _logger.LogInformation("Starting {Trigger} vault indexing", trigger);
+            var result = await vaultIndexer.IndexVaultAsync(ct);
+            sw.Stop();
+
+            log.Status = "Success";
+            log.ItemsAdded = result.NotesAdded;
+            log.ItemsUpdated = result.NotesUpdated;
+            log.ItemsScanned = result.ChunksCreated;
+            log.DurationMs = (int)sw.ElapsedMilliseconds;
+            log.Details = $"Removed: {result.NotesRemoved}";
+
+            if (result.NotesAdded > 0 || result.NotesUpdated > 0 || result.NotesRemoved > 0)
+            {
+                _logger.LogInformation(
+                    "{Trigger} vault indexing completed: {Added} added, {Updated} updated, {Removed} removed, {Chunks} chunks in {DurationMs}ms",
+                    trigger, result.NotesAdded, result.NotesUpdated, result.NotesRemoved, result.ChunksCreated, sw.ElapsedMilliseconds);
+            }
+            else
+            {
+                _logger.LogInformation("{Trigger} vault indexing completed (no changes) in {DurationMs}ms", trigger, sw.ElapsedMilliseconds);
+            }
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            log.Status = "Failed";
+            log.DurationMs = (int)sw.ElapsedMilliseconds;
+            log.Details = $"{ex.GetType().Name}: {ex.Message}";
+
+            _logger.LogWarning(ex, "{Trigger} vault indexing failed after {DurationMs}ms", trigger, sw.ElapsedMilliseconds);
+
+            if (_errorNotifier != null)
+            {
+                await _errorNotifier.NotifyErrorAsync("Vault indexing", ex, ct);
+            }
+        }
+
+        try
+        {
+            await logRepo.AddAsync(log, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to log vault indexing");
         }
     }
 }
