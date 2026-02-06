@@ -57,9 +57,12 @@ public interface IActivitiesSkillExecutor
 
 public interface IDrawingReferenceSkillExecutor
 {
-    Task<string> ExecuteAsync(string subject, CancellationToken ct);
+    Task<DrawingReferenceExecutorResult> ExecuteAsync(string subject, CancellationToken ct);
+    Task<DrawingReferenceExecutorResult> ExecuteFromSourceAsync(string subject, string source, CancellationToken ct);
     string GetRandomTopic();
 }
+
+public record DrawingReferenceExecutorResult(string Message, string Source);
 
 public interface ICalendarEventSkillExecutor
 {

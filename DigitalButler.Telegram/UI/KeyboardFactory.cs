@@ -97,13 +97,24 @@ public static class KeyboardFactory
         });
     }
 
-    public static InlineKeyboardMarkup BuildDrawingResultKeyboard()
+    public static InlineKeyboardMarkup BuildDrawingResultKeyboard(string? currentSource = null)
     {
+        var tryOtherLabel = currentSource switch
+        {
+            "unsplash" => "Try Pexels",
+            "pexels" => "Try Unsplash",
+            _ => "Try Other Site"
+        };
+
         return new InlineKeyboardMarkup(new[]
         {
             new[]
             {
                 InlineKeyboardButton.WithCallbackData("Different Image", "drawref:different_image"),
+                InlineKeyboardButton.WithCallbackData(tryOtherLabel, "drawref:try_other_source")
+            },
+            new[]
+            {
                 InlineKeyboardButton.WithCallbackData("Different Subject", "drawref:different_subject")
             }
         });

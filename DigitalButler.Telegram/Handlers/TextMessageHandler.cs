@@ -311,10 +311,11 @@ public sealed class TextMessageHandler : ITextMessageHandler
         try
         {
             _stateManager.SetLastDrawingSubject(chatId, subject);
-            var reply = await _drawingExecutor.ExecuteAsync(subject, ct);
+            var result = await _drawingExecutor.ExecuteAsync(subject, ct);
+            _stateManager.SetLastDrawingSource(chatId, result.Source);
 
-            await bot.SendTextMessageAsync(chatId, TruncateForTelegram(reply),
-                replyMarkup: KeyboardFactory.BuildDrawingResultKeyboard(),
+            await bot.SendTextMessageAsync(chatId, TruncateForTelegram(result.Message),
+                replyMarkup: KeyboardFactory.BuildDrawingResultKeyboard(result.Source),
                 cancellationToken: ct);
         }
         catch (Exception ex)

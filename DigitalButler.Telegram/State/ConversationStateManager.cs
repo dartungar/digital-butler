@@ -141,6 +141,17 @@ public class ConversationStateManager
         return _states.TryGetValue(chatId, out var state) ? state.LastDrawingSubject : null;
     }
 
+    public void SetLastDrawingSource(long chatId, string source)
+    {
+        var state = GetOrCreateState(chatId);
+        state.LastDrawingSource = source;
+    }
+
+    public string? GetLastDrawingSource(long chatId)
+    {
+        return _states.TryGetValue(chatId, out var state) ? state.LastDrawingSource : null;
+    }
+
     public void CleanupExpired()
     {
         var expiredChats = _states
@@ -185,5 +196,6 @@ public class ConversationStateManager
         public ParsedCalendarEvent? PendingCalendarEvent { get; set; }
         public DateTimeOffset? PendingCalendarEventAt { get; set; }
         public string? LastDrawingSubject { get; set; }
+        public string? LastDrawingSource { get; set; }
     }
 }

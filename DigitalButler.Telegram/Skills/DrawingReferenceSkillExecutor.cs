@@ -5,13 +5,13 @@ namespace DigitalButler.Telegram.Skills;
 
 public sealed class DrawingReferenceSkillExecutor : IDrawingReferenceSkillExecutor
 {
-    private readonly IDrawingReferenceService _drawingRefService;
+    private readonly ICompositeDrawingReferenceService _drawingRefService;
     private readonly ISubjectTranslator _subjectTranslator;
     private readonly IRandomDrawingTopicService _topicService;
     private readonly ILogger<DrawingReferenceSkillExecutor> _logger;
 
     public DrawingReferenceSkillExecutor(
-        IDrawingReferenceService drawingRefService,
+        ICompositeDrawingReferenceService drawingRefService,
         ISubjectTranslator subjectTranslator,
         IRandomDrawingTopicService topicService,
         ILogger<DrawingReferenceSkillExecutor> logger)
@@ -24,7 +24,7 @@ public sealed class DrawingReferenceSkillExecutor : IDrawingReferenceSkillExecut
 
     public string GetRandomTopic() => _topicService.GetRandomTopic();
 
-    public async Task<string> ExecuteAsync(string subject, CancellationToken ct)
+    public async Task<DrawingReferenceExecutorResult> ExecuteAsync(string subject, CancellationToken ct)
     {
         var original = subject.Trim();
         var translated = await _subjectTranslator.TranslateToEnglishAsync(original, ct);
@@ -36,16 +36,50 @@ public sealed class DrawingReferenceSkillExecutor : IDrawingReferenceSkillExecut
         var result = await _drawingRefService.GetReferenceAsync(translated, ct);
         if (result is null)
         {
-            return $"I couldn't find a drawing reference for \"{original}\". Try a different subject?";
+            return new DrawingReferenceExecutorResult(
+                $"I couldn't find a drawing reference for \"{original}\". Try a different subject?",
+                "unknown");
         }
 
+        var message = FormatResult(original, translated, result.Value);
+        return new DrawingReferenceExecutorResult(message, result.Value.Source.ToString().ToLowerInvariant());
+    }
+
+    public async Task<DrawingReferenceExecutorResult> ExecuteFromSourceAsync(string subject, string source, CancellationToken ct)
+    {
+        var original = subject.Trim();
+        var translated = await _subjectTranslator.TranslateToEnglishAsync(original, ct);
+        if (string.IsNullOrWhiteSpace(translated))
+        {
+            translated = original;
+        }
+
+        var imageSource = source.Equals("pexels", StringComparison.OrdinalIgnoreCase)
+            ? ImageSource.Pexels
+            : ImageSource.Unsplash;
+
+        var result = await _drawingRefService.GetReferenceFromSourceAsync(translated, imageSource, ct);
+        if (result is null)
+        {
+            return new DrawingReferenceExecutorResult(
+                $"I couldn't find a drawing reference for \"{original}\" on {source}. Try a different subject?",
+                source.ToLowerInvariant());
+        }
+
+        var message = FormatResult(original, translated, result.Value);
+        return new DrawingReferenceExecutorResult(message, result.Value.Source.ToString().ToLowerInvariant());
+    }
+
+    private static string FormatResult(string original, string translated, DrawingReferenceResult result)
+    {
+        var sourceName = result.Source == ImageSource.Unsplash ? "Unsplash" : "Pexels";
         var header = string.Equals(original, translated, StringComparison.OrdinalIgnoreCase)
             ? $"Drawing reference for \"{original}\":"
             : $"Drawing reference for \"{original}\" (searching: \"{translated}\"):";
 
         return header + "\n" +
-               $"{result.Value.ImageUrl}\n" +
-               $"Photo by {result.Value.PhotographerName} on Unsplash: {result.Value.PhotoPageUrl}";
+               $"{result.ImageUrl}\n" +
+               $"Photo by {result.PhotographerName} on {sourceName}: {result.PhotoPageUrl}";
     }
 
     public static bool TryExtractSubject(string text, out string? subject)

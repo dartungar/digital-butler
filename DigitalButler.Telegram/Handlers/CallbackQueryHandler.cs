@@ -229,9 +229,10 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
             try
             {
                 _stateManager.SetLastDrawingSubject(chatId, topic);
-                var reply = await _drawingExecutor.ExecuteAsync(topic, ct);
-                await bot.SendTextMessageAsync(chatId, TruncateForTelegram(reply),
-                    replyMarkup: KeyboardFactory.BuildDrawingResultKeyboard(),
+                var result = await _drawingExecutor.ExecuteAsync(topic, ct);
+                _stateManager.SetLastDrawingSource(chatId, result.Source);
+                await bot.SendTextMessageAsync(chatId, TruncateForTelegram(result.Message),
+                    replyMarkup: KeyboardFactory.BuildDrawingResultKeyboard(result.Source),
                     cancellationToken: ct);
             }
             catch (Exception ex)
@@ -270,14 +271,45 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
 
             try
             {
-                var reply = await _drawingExecutor.ExecuteAsync(lastSubject, ct);
-                await bot.SendTextMessageAsync(chatId, TruncateForTelegram(reply),
-                    replyMarkup: KeyboardFactory.BuildDrawingResultKeyboard(),
+                var result = await _drawingExecutor.ExecuteAsync(lastSubject, ct);
+                _stateManager.SetLastDrawingSource(chatId, result.Source);
+                await bot.SendTextMessageAsync(chatId, TruncateForTelegram(result.Message),
+                    replyMarkup: KeyboardFactory.BuildDrawingResultKeyboard(result.Source),
                     cancellationToken: ct);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to generate drawing reference");
+                await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), ct);
+            }
+        }
+        else if (action == "try_other_source")
+        {
+            await bot.AnswerCallbackQueryAsync(callbackQuery.Id, cancellationToken: ct);
+
+            var lastSubject = _stateManager.GetLastDrawingSubject(chatId);
+            if (string.IsNullOrWhiteSpace(lastSubject))
+            {
+                await SendWithKeyboardAsync(bot, chatId, "No previous subject found. Try /drawref <subject>", ct);
+                return;
+            }
+
+            var lastSource = _stateManager.GetLastDrawingSource(chatId);
+            var newSource = lastSource?.Equals("pexels", StringComparison.OrdinalIgnoreCase) == true ? "unsplash" : "pexels";
+
+            await SendWithKeyboardAsync(bot, chatId, $"Searching on {(newSource == "pexels" ? "Pexels" : "Unsplash")}...", ct);
+
+            try
+            {
+                var result = await _drawingExecutor.ExecuteFromSourceAsync(lastSubject, newSource, ct);
+                _stateManager.SetLastDrawingSource(chatId, result.Source);
+                await bot.SendTextMessageAsync(chatId, TruncateForTelegram(result.Message),
+                    replyMarkup: KeyboardFactory.BuildDrawingResultKeyboard(result.Source),
+                    cancellationToken: ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to generate drawing reference from {Source}", newSource);
                 await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), ct);
             }
         }
