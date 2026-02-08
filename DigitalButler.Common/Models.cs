@@ -191,6 +191,13 @@ public interface ISummarizationService
         string taskName,
         string? skillInstructions = null,
         CancellationToken ct = default);
+
+    Task<string> SummarizeUnifiedAsync(
+        IEnumerable<ContextItem> items,
+        IReadOnlyDictionary<ContextSource, string> instructionsBySource,
+        string taskName,
+        string? skillInstructions = null,
+        CancellationToken ct = default);
 }
 
 public interface IScheduleService

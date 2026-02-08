@@ -139,7 +139,7 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         var instructionsBySource = await _instructionService.GetBySourcesAsync(sources, ct);
         var skillInstructions = cfg?.Content;
         var period = weekly ? "weekly" : "daily";
-        var result = await _summarizer.SummarizeAsync(items, instructionsBySource, taskName, BuildSkillPrompt(period, skillInstructions, obsidianAnalysisText), ct);
+        var result = await _summarizer.SummarizeUnifiedAsync(items, instructionsBySource, taskName, BuildSkillPrompt(period, skillInstructions, obsidianAnalysisText), ct);
 
         // Append citations if any
         if (citations.Count > 0)
@@ -193,33 +193,42 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         if (hasObsidianAnalysis && period == "daily")
         {
             sb.AppendLine();
-            sb.AppendLine("IMPORTANT: Structure your daily summary with these sections:");
+            sb.AppendLine("LANGUAGE: Write the ENTIRE summary in a single language. Match the language of the custom skill instructions. If no custom instructions are provided, default to English. Do NOT mix languages.");
+            sb.AppendLine("Do NOT separate content by source. Merge all sources into a single cohesive summary.");
             sb.AppendLine();
-            sb.AppendLine("1. ENCOURAGEMENT (1-2 sentences at the start):");
+            sb.AppendLine("Structure the summary as four blocks separated by blank lines:");
+            sb.AppendLine();
+            sb.AppendLine("1. Encouragement (1-2 sentences, NO heading):");
             sb.AppendLine("   - Acknowledge specific accomplishments from YESTERDAY'S ACCOMPLISHMENTS");
             sb.AppendLine("   - Be warm but concise");
             sb.AppendLine();
-            sb.AppendLine("2. HEADS UP (if any alerts are present):");
-            sb.AppendLine("   - Include alerts from the HEADS UP section");
+            sb.AppendLine("2. Heads up (NO heading, only if there are concerns):");
+            sb.AppendLine("   - Reference metrics (energy, motivation, stress, etc.) to support your points");
             sb.AppendLine("   - If energy/motivation was low, suggest self-care");
             sb.AppendLine("   - If stress was high, acknowledge it and suggest taking it easy");
             sb.AppendLine("   - If yesterday's journal tone was negative, be supportive");
-            sb.AppendLine("   - If metrics were good, briefly celebrate");
+            sb.AppendLine("   - If everything looks good, skip this block entirely");
             sb.AppendLine();
-            sb.AppendLine("3. TODAY'S AGENDA:");
-            sb.AppendLine("   - Combine calendar events with TODAY'S PLANNED TASKS");
+            sb.AppendLine("3. Agenda (this is the ONLY block with a heading — use 'Agenda:'):");
+            sb.AppendLine("   - Combine calendar events with TODAY'S PLANNED TASKS into a single list");
             sb.AppendLine("   - Show priority [*] and attention [!] tasks prominently");
             sb.AppendLine("   - Include pending tasks alongside calendar events");
             sb.AppendLine();
-            sb.AppendLine("4. OTHER CONTEXT:");
-            sb.AppendLine("   - Any other relevant information (emails, personal notes)");
+            sb.AppendLine("4. Other context (NO heading, brief):");
+            sb.AppendLine("   - Journal mood/highlights if notable");
+            sb.AppendLine("   - Metrics summary in one compact line (e.g. Energy 6, Motivation 7, Stress 3)");
+            sb.AppendLine("   - Habits summary in one compact line (e.g. Soul 5, Body 3, Indulging 2)");
+            sb.AppendLine("   - Any other relevant info (emails, personal notes)");
+            sb.AppendLine("   - Do NOT repeat metrics already mentioned in the heads-up block");
             sb.AppendLine();
             sb.AppendLine("Focus on being helpful and supportive. Keep it concise.");
         }
         else if (hasObsidianAnalysis && period == "weekly")
         {
+            sb.AppendLine();
+            sb.AppendLine("LANGUAGE: Write the ENTIRE summary in a single language. Match the language of the custom skill instructions. If no custom instructions are provided, default to English. Do NOT mix languages.");
             sb.AppendLine("Output a concise summary of what happened during this period.");
-            sb.AppendLine("Focus on facts and events.");
+            sb.AppendLine("Write it as natural flowing text without section headings.");
             sb.AppendLine();
             sb.AppendLine("Include relevant insights from the analysis below:");
             sb.AppendLine("- Weekly trends in energy/motivation/stress");
@@ -229,7 +238,10 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         }
         else
         {
+            sb.AppendLine();
+            sb.AppendLine("LANGUAGE: Write the ENTIRE summary in a single language. Match the language of the custom skill instructions. If no custom instructions are provided, default to English. Do NOT mix languages.");
             sb.AppendLine("Output a concise summary of what happened during this period.");
+            sb.AppendLine("Write it as natural flowing text without section headings.");
             sb.AppendLine("Focus on facts and events. Do NOT include action items, advice, recommendations, or suggestions.");
         }
 

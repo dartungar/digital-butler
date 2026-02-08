@@ -207,6 +207,108 @@ Do not invent items that are not present.
         return value[..maxLen] + "…";
     }
 
+    public async Task<string> SummarizeUnifiedAsync(
+        IEnumerable<ContextItem> items,
+        IReadOnlyDictionary<ContextSource, string> instructionsBySource,
+        string taskName,
+        string? skillInstructions = null,
+        CancellationToken ct = default)
+    {
+        var settings = await _resolver.ResolveAsync(taskName, ct);
+        if (string.IsNullOrWhiteSpace(settings.ApiKey) || string.IsNullOrWhiteSpace(settings.Model))
+        {
+            throw new InvalidOperationException("AI settings are not configured");
+        }
+
+        var itemList = items.ToList();
+        _logger.LogDebug("AI Request (unified) - Task: {Task}, Model: {Model}, TotalItems: {ItemCount}",
+            taskName, settings.Model, itemList.Count);
+
+        if (itemList.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var systemPrompt = BuildUnifiedSystemPrompt(instructionsBySource, skillInstructions);
+        var prompt = BuildUnifiedPrompt(itemList, taskName);
+        var endpoint = OpenAiEndpoint.ResolveEndpoint(settings.BaseUrl);
+        if (!endpoint.Contains("/responses", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Only the OpenAI Responses API is supported. Configure AI_BASE_URL (or task ProviderUrl) to point to '/v1/responses'. Resolved endpoint: {endpoint}");
+        }
+
+        var (text, rawBody, incompleteReason) = await SendResponsesAsync(endpoint, settings, systemPrompt, prompt, MaxOutputTokens, ct);
+        if (string.IsNullOrWhiteSpace(text) && string.Equals(incompleteReason, "max_output_tokens", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation("Responses output truncated by max_output_tokens; retrying with higher limit {RetryMax} (model={Model})", RetryMaxOutputTokens, settings.Model);
+            (text, rawBody, _) = await SendResponsesAsync(endpoint, settings, systemPrompt, prompt, RetryMaxOutputTokens, ct);
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            _logger.LogWarning("Responses API returned empty text output. Body (truncated): {Body}", TruncateForLogs(rawBody, 2000));
+            throw new InvalidOperationException("AI response contained no text output (Responses API). See server logs for the raw response body.");
+        }
+
+        return text;
+    }
+
+    private static string BuildUnifiedSystemPrompt(
+        IReadOnlyDictionary<ContextSource, string> instructionsBySource,
+        string? skillInstructions)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(BaseSystemPrompt.Trim());
+        sb.AppendLine();
+        sb.AppendLine("You will receive context items from multiple sources combined.");
+
+        if (!string.IsNullOrWhiteSpace(skillInstructions))
+        {
+            sb.AppendLine();
+            sb.AppendLine("Skill instructions:");
+            sb.AppendLine(skillInstructions.Trim());
+        }
+
+        foreach (var (source, instructions) in instructionsBySource)
+        {
+            if (!string.IsNullOrWhiteSpace(instructions))
+            {
+                sb.AppendLine();
+                sb.AppendLine($"Custom instructions for {source}:");
+                sb.AppendLine(instructions.Trim());
+            }
+        }
+
+        return sb.ToString().Trim();
+    }
+
+    private static string BuildUnifiedPrompt(List<ContextItem> items, string taskName)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("Summarize the following context items into a single unified summary.");
+        sb.AppendLine("Merge information from all sources naturally. Do NOT separate by source.");
+        sb.AppendLine();
+        sb.AppendLine("Items:");
+
+        var groups = items.GroupBy(x => x.Source).OrderBy(g => g.Key);
+        foreach (var group in groups)
+        {
+            sb.AppendLine($"[Source: {group.Key}]");
+            foreach (var item in group)
+            {
+                var title = TruncateForPrompt(item.Title, MaxTitleCharsInPrompt);
+                var body = TruncateForPrompt(CompressBodyForPrompt(item.Body), MaxBodyCharsInPrompt);
+                sb.AppendLine($"- {title}: {body}");
+                if (item.RelevantDate is not null)
+                {
+                    sb.AppendLine($"  Relevant: {item.RelevantDate:O}");
+                }
+            }
+        }
+
+        return sb.ToString();
+    }
+
     private static string BuildPromptForOneSource(ContextSource source, IEnumerable<ContextItem> items, string taskName)
     {
         // Motivation/activities are skills, not summaries. Don't force a "Summarize" instruction.
