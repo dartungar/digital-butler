@@ -133,11 +133,12 @@ Do not invent items that are not present.
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", settings.ApiKey);
 
-        var (text, rawBody, incompleteReason) = await SendResponsesAsync(endpoint, settings, systemPrompt, prompt, MaxOutputTokens, ct);
+        var verbosity = ResolveTextVerbosity(taskName);
+        var (text, rawBody, incompleteReason) = await SendResponsesAsync(endpoint, settings, systemPrompt, prompt, verbosity, MaxOutputTokens, ct);
         if (string.IsNullOrWhiteSpace(text) && string.Equals(incompleteReason, "max_output_tokens", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogInformation("Responses output truncated by max_output_tokens; retrying with higher limit {RetryMax} (model={Model}, source={Source})", RetryMaxOutputTokens, settings.Model, source);
-            (text, rawBody, _) = await SendResponsesAsync(endpoint, settings, systemPrompt, prompt, RetryMaxOutputTokens, ct);
+            (text, rawBody, _) = await SendResponsesAsync(endpoint, settings, systemPrompt, prompt, verbosity, RetryMaxOutputTokens, ct);
         }
 
         if (string.IsNullOrWhiteSpace(text))
@@ -154,6 +155,7 @@ Do not invent items that are not present.
         AiSettings settings,
         string systemPrompt,
         string prompt,
+        string textVerbosity,
         int maxOutputTokens,
         CancellationToken ct)
     {
@@ -168,7 +170,7 @@ Do not invent items that are not present.
 
             // Keep reasoning small so we actually get visible text within the cap.
             reasoning = new { effort = "low" },
-            text = new { verbosity = "low" },
+            text = new { verbosity = textVerbosity },
 
             max_output_tokens = maxOutputTokens
         };
@@ -237,11 +239,12 @@ Do not invent items that are not present.
             throw new InvalidOperationException($"Only the OpenAI Responses API is supported. Configure AI_BASE_URL (or task ProviderUrl) to point to '/v1/responses'. Resolved endpoint: {endpoint}");
         }
 
-        var (text, rawBody, incompleteReason) = await SendResponsesAsync(endpoint, settings, systemPrompt, prompt, MaxOutputTokens, ct);
+        var verbosity = ResolveTextVerbosity(taskName);
+        var (text, rawBody, incompleteReason) = await SendResponsesAsync(endpoint, settings, systemPrompt, prompt, verbosity, MaxOutputTokens, ct);
         if (string.IsNullOrWhiteSpace(text) && string.Equals(incompleteReason, "max_output_tokens", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogInformation("Responses output truncated by max_output_tokens; retrying with higher limit {RetryMax} (model={Model})", RetryMaxOutputTokens, settings.Model);
-            (text, rawBody, _) = await SendResponsesAsync(endpoint, settings, systemPrompt, prompt, RetryMaxOutputTokens, ct);
+            (text, rawBody, _) = await SendResponsesAsync(endpoint, settings, systemPrompt, prompt, verbosity, RetryMaxOutputTokens, ct);
         }
 
         if (string.IsNullOrWhiteSpace(text))
@@ -380,6 +383,16 @@ Do not invent items that are not present.
         }
 
         return value[..maxLen] + "…";
+    }
+
+    private static string ResolveTextVerbosity(string taskName)
+    {
+        return taskName switch
+        {
+            "daily-summary" => "medium",
+            "weekly-summary" => "medium",
+            _ => "low"
+        };
     }
 
     private static string BuildPerSourceSystemPrompt(ContextSource source, string? perSourceInstructions, string? skillInstructions)

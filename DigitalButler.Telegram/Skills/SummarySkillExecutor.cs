@@ -76,6 +76,8 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         var allowedMask = SkillContextDefaults.ResolveSourcesMask(skill, cfg?.ContextSourcesMask ?? -1);
         items = items.Where(x => ContextSourceMask.Contains(allowedMask, x.Source)).ToList();
 
+        items = PrioritizeItems(items, weekly, tz);
+
         // Add vault enrichment if requested
         if (!string.IsNullOrWhiteSpace(vaultQuery) || (startDate.HasValue && endDate.HasValue))
         {
@@ -135,11 +137,35 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
             }
         }
 
+        // If the current window has no context items, but Obsidian analysis exists,
+        // add it as a synthetic context item so summary generation still produces output.
+        if (items.Count == 0 && !string.IsNullOrWhiteSpace(obsidianAnalysisText))
+        {
+            items.Add(new ContextItem
+            {
+                Source = ContextSource.Obsidian,
+                Title = weekly ? "Weekly notes analysis" : "Daily notes analysis",
+                Body = obsidianAnalysisText.Trim(),
+                RelevantDate = DateTimeOffset.UtcNow,
+                IsTimeless = false,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow,
+                ExternalId = $"obsidian:analysis:{(weekly ? "weekly" : "daily")}:{DateTimeOffset.UtcNow:yyyyMMddHHmmss}",
+                Category = "Obsidian Analysis"
+            });
+        }
+
+        if (items.Count == 0)
+        {
+            return "No context items found for this period. Try running /sync and verify enabled sources in settings.";
+        }
+
         var sources = items.Select(x => x.Source).Distinct().ToArray();
         var instructionsBySource = await _instructionService.GetBySourcesAsync(sources, ct);
         var skillInstructions = cfg?.Content;
         var period = weekly ? "weekly" : "daily";
-        var result = await _summarizer.SummarizeUnifiedAsync(items, instructionsBySource, taskName, BuildSkillPrompt(period, skillInstructions, obsidianAnalysisText), ct);
+        var dataFreshnessNote = BuildDataFreshnessNote(items, weekly, tz);
+        var result = await _summarizer.SummarizeUnifiedAsync(items, instructionsBySource, taskName, BuildSkillPrompt(period, skillInstructions, obsidianAnalysisText, dataFreshnessNote), ct);
 
         // Append citations if any
         if (citations.Count > 0)
@@ -182,7 +208,126 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         return await _contextService.GetForWindowAsync(start, end, take: 500, ct: ct);
     }
 
-    private static string BuildSkillPrompt(string period, string? custom, string? obsidianAnalysis = null)
+    private static List<ContextItem> PrioritizeItems(List<ContextItem> items, bool weekly, TimeZoneInfo tz)
+    {
+        if (items.Count == 0)
+        {
+            return items;
+        }
+
+        var now = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
+        var maxItems = weekly ? 220 : 140;
+
+        return items
+            .Select(item => new { Item = item, Score = ScoreItem(item, now, weekly) })
+            .OrderByDescending(x => x.Score)
+            .ThenBy(x => x.Item.RelevantDate ?? x.Item.UpdatedAt)
+            .Take(maxItems)
+            .Select(x => x.Item)
+            .ToList();
+    }
+
+    private static double ScoreItem(ContextItem item, DateTimeOffset now, bool weekly)
+    {
+        var score = item.Source switch
+        {
+            ContextSource.GoogleCalendar => 30,
+            ContextSource.Personal => 28,
+            ContextSource.Obsidian => 24,
+            ContextSource.Gmail => 16,
+            _ => 12
+        };
+
+        if (item.RelevantDate is DateTimeOffset relevant)
+        {
+            var delta = relevant - now;
+            if (delta.TotalHours is >= -12 and <= 36)
+            {
+                score += 35;
+            }
+            else if (delta.TotalDays is >= -2 and <= 3)
+            {
+                score += 18;
+            }
+            else if (weekly && delta.TotalDays is >= -7 and <= 7)
+            {
+                score += 10;
+            }
+        }
+
+        var text = $"{item.Title} {item.Body}".ToLowerInvariant();
+        if (ContainsAny(text, "urgent", "asap", "deadline", "today", "tomorrow", "important", "[!]", "[*]", "pending", "overdue"))
+        {
+            score += 18;
+        }
+
+        if (item.Source == ContextSource.Gmail && ContainsAny(text, "newsletter", "promotion", "promo", "sale", "discount", "unsubscribe"))
+        {
+            score -= 18;
+        }
+
+        if (item.IsTimeless)
+        {
+            score -= 6;
+        }
+
+        var updateAgeHours = (now - item.UpdatedAt).TotalHours;
+        if (updateAgeHours <= 12)
+        {
+            score += 6;
+        }
+        else if (updateAgeHours >= 72)
+        {
+            score -= 4;
+        }
+
+        return score;
+    }
+
+    private static bool ContainsAny(string text, params string[] keywords)
+    {
+        foreach (var keyword in keywords)
+        {
+            if (text.Contains(keyword, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string? BuildDataFreshnessNote(List<ContextItem> items, bool weekly, TimeZoneInfo tz)
+    {
+        if (items.Count == 0)
+        {
+            return null;
+        }
+
+        var now = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
+        var thresholdHours = weekly ? 36 : 12;
+        var staleSources = items
+            .GroupBy(x => x.Source)
+            .Select(group =>
+            {
+                var latest = group.Max(x => x.UpdatedAt);
+                var ageHours = (now - latest).TotalHours;
+                return new { Source = group.Key, AgeHours = ageHours };
+            })
+            .Where(x => x.AgeHours > thresholdHours)
+            .OrderByDescending(x => x.AgeHours)
+            .ToList();
+
+        if (staleSources.Count == 0)
+        {
+            return null;
+        }
+
+        var pieces = staleSources.Select(x => $"{x.Source}: latest update {Math.Round(x.AgeHours)}h ago");
+        return string.Join(", ", pieces);
+    }
+
+    private static string BuildSkillPrompt(string period, string? custom, string? obsidianAnalysis = null, string? dataFreshness = null)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("Skill: summary");
@@ -196,32 +341,29 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
             sb.AppendLine("LANGUAGE: Write the ENTIRE summary in a single language. Match the language of the custom skill instructions. If no custom instructions are provided, default to English. Do NOT mix languages.");
             sb.AppendLine("Do NOT separate content by source. Merge all sources into a single cohesive summary.");
             sb.AppendLine();
-            sb.AppendLine("Structure the summary as four blocks separated by blank lines:");
+            sb.AppendLine("Write in a warm, direct, and practical tone. Avoid generic motivational fluff.");
+            sb.AppendLine("Every claim should be grounded in provided data; do not invent facts.");
             sb.AppendLine();
-            sb.AppendLine("1. Encouragement (1-2 sentences, NO heading):");
-            sb.AppendLine("   - Acknowledge specific accomplishments from YESTERDAY'S ACCOMPLISHMENTS");
-            sb.AppendLine("   - Be warm but concise");
+            sb.AppendLine("Structure the summary with these blocks separated by blank lines:");
             sb.AppendLine();
-            sb.AppendLine("2. Heads up (NO heading, only if there are concerns):");
-            sb.AppendLine("   - Reference metrics (energy, motivation, stress, etc.) to support your points");
-            sb.AppendLine("   - If energy/motivation was low, suggest self-care");
-            sb.AppendLine("   - If stress was high, acknowledge it and suggest taking it easy");
-            sb.AppendLine("   - If yesterday's journal tone was negative, be supportive");
-            sb.AppendLine("   - If everything looks good, skip this block entirely");
+            sb.AppendLine("1. Top priorities today:");
+            sb.AppendLine("   - Exactly 3 bullets, ordered by impact/urgency");
+            sb.AppendLine("   - For each: what it is, why it matters, and first concrete step");
+            sb.AppendLine("   - Prioritize deadline/attention tasks and time-bound events");
             sb.AppendLine();
-            sb.AppendLine("3. Agenda (this is the ONLY block with a heading — use 'Agenda:'):");
-            sb.AppendLine("   - Combine calendar events with TODAY'S PLANNED TASKS into a single list");
-            sb.AppendLine("   - Show priority [*] and attention [!] tasks prominently");
-            sb.AppendLine("   - Include pending tasks alongside calendar events");
+            sb.AppendLine("2. Human check-in:");
+            sb.AppendLine("   - 1-2 sentences of grounded encouragement tied to specific progress");
+            sb.AppendLine("   - If there are warning signals (high stress, low energy/motivation), acknowledge them briefly and suggest gentler pacing");
             sb.AppendLine();
-            sb.AppendLine("4. Other context (NO heading, brief):");
-            sb.AppendLine("   - Journal mood/highlights if notable");
-            sb.AppendLine("   - Metrics summary in one compact line (e.g. Energy 6, Motivation 7, Stress 3)");
-            sb.AppendLine("   - Habits summary in one compact line (e.g. Soul 5, Body 3, Indulging 2)");
-            sb.AppendLine("   - Any other relevant info (emails, personal notes)");
-            sb.AppendLine("   - Do NOT repeat metrics already mentioned in the heads-up block");
+            sb.AppendLine("3. Agenda:");
+            sb.AppendLine("   - Compact timeline/list of today's events and planned tasks");
+            sb.AppendLine("   - Surface [*] and [!] tasks prominently");
             sb.AppendLine();
-            sb.AppendLine("Focus on being helpful and supportive. Keep it concise.");
+            sb.AppendLine("4. Keep in mind:");
+            sb.AppendLine("   - 1 short line on what to deprioritize/ignore today to reduce overload");
+            sb.AppendLine("   - 1 compact metrics line only if meaningful");
+            sb.AppendLine();
+            sb.AppendLine("Keep total length concise and useful, not verbose.");
         }
         else if (hasObsidianAnalysis && period == "weekly")
         {
@@ -249,6 +391,14 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         {
             sb.AppendLine();
             sb.AppendLine(custom.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(dataFreshness))
+        {
+            sb.AppendLine();
+            sb.AppendLine("=== DATA FRESHNESS ===");
+            sb.AppendLine(dataFreshness.Trim());
+            sb.AppendLine("If any source appears stale, mention uncertainty briefly in the summary instead of speaking with full confidence.");
         }
 
         // Include Obsidian analysis directly in the prompt (not as a separate context source)
