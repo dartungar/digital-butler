@@ -41,7 +41,7 @@ services:
       - "7766:8080"
     volumes:
       - butler-data:/data
-      - /var/notes:/var/notes:ro
+      - /var/headless_vault:/var/notes:ro
     restart: unless-stopped
 volumes:
   butler-data:
