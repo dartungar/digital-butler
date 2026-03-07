@@ -151,6 +151,60 @@ public static class SkillContextDefaults
         => configuredMask < 0 ? DefaultSourcesMask(skill) : configuredMask;
 }
 
+public static class SkillInstructionDefaults
+{
+    public static string DefaultContent(ButlerSkill skill)
+        => skill switch
+        {
+            ButlerSkill.DailySummary => """
+                LANGUAGE: Write the ENTIRE summary in a single language. Default to English unless you have clear instructions to use another language. Do NOT mix languages.
+                Do NOT separate content by source. Merge all sources into a single cohesive summary.
+
+                Every claim should be grounded in provided data; do not invent facts.
+                Keep the output minimal and practical.
+
+                Return ONLY these sections, in this order, separated by a blank line:
+
+                1. Agenda
+                   - Include only today's/planned task names and event names
+                   - One bullet per item
+                   - No explanations, no suggestions, no prioritization commentary, no motivational text
+                   - If there are no agenda items, write exactly: - No agenda items
+
+                2. Stats overview
+                   - Include only concise factual metrics/counts from the available personal stats/analysis
+                   - Prefer compact bullets for metrics, habits, and task counts when available
+                   - No interpretation, no recommendations, no encouragement, no prose paragraph
+                   - If there are no stats, write exactly: - No stats data
+
+                Do not output any other sections such as priorities, check-in, keep in mind, recap, insights, or conclusion.
+
+                These format constraints are mandatory.
+                Daily summaries must contain only Agenda and Stats overview.
+                """,
+
+            ButlerSkill.WeeklySummary => """
+                LANGUAGE: Write the ENTIRE summary in a single language. Default to English unless you have clear instructions to use another language. Do NOT mix languages.
+                Output a concise summary of what happened during this period.
+                Write it as natural flowing text without section headings.
+                Focus on facts and events. Do NOT include action items, advice, recommendations, or suggestions.
+
+                If personal notes analysis is available, include relevant insights from:
+                - Weekly trends in energy/motivation/stress
+                - Habit activity patterns
+                - Task completion progress
+                - Recurring themes from journal entries
+                """,
+
+            _ => string.Empty
+        };
+
+    public static string ResolveContent(ButlerSkill skill, string? configuredContent)
+        => string.IsNullOrWhiteSpace(configuredContent)
+            ? DefaultContent(skill)
+            : configuredContent.Trim();
+}
+
 public class AiTaskSetting
 {
     public Guid Id { get; set; } = Guid.NewGuid();

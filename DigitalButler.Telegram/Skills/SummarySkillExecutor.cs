@@ -162,7 +162,7 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
 
         var sources = items.Select(x => x.Source).Distinct().ToArray();
         var instructionsBySource = await _instructionService.GetBySourcesAsync(sources, ct);
-        var skillInstructions = cfg?.Content;
+        var skillInstructions = SkillInstructionDefaults.ResolveContent(skill, cfg?.Content);
         var period = weekly ? "weekly" : "daily";
         var dataFreshnessNote = BuildDataFreshnessNote(items, weekly, tz);
         var result = await _summarizer.SummarizeUnifiedAsync(items, instructionsBySource, taskName, BuildSkillPrompt(period, skillInstructions, obsidianAnalysisText, dataFreshnessNote), ct);
@@ -333,63 +333,10 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         sb.AppendLine("Skill: summary");
         sb.AppendLine($"Period: {period}");
 
-        var hasObsidianAnalysis = !string.IsNullOrWhiteSpace(obsidianAnalysis);
-
-        if (hasObsidianAnalysis && period == "daily")
-        {
-            sb.AppendLine();
-            sb.AppendLine("LANGUAGE: Write the ENTIRE summary in a single language. Match the language of the custom skill instructions. If no custom instructions are provided, default to English. Do NOT mix languages.");
-            sb.AppendLine("Do NOT separate content by source. Merge all sources into a single cohesive summary.");
-            sb.AppendLine();
-            sb.AppendLine("Write in a warm, direct, and practical tone. Avoid generic motivational fluff.");
-            sb.AppendLine("Every claim should be grounded in provided data; do not invent facts.");
-            sb.AppendLine();
-            sb.AppendLine("Structure the summary with these blocks separated by blank lines:");
-            sb.AppendLine();
-            sb.AppendLine("1. Top priorities today:");
-            sb.AppendLine("   - Exactly 3 bullets, ordered by impact/urgency");
-            sb.AppendLine("   - For each: what it is, why it matters, and first concrete step");
-            sb.AppendLine("   - Prioritize deadline/attention tasks and time-bound events");
-            sb.AppendLine();
-            sb.AppendLine("2. Human check-in:");
-            sb.AppendLine("   - 1-2 sentences of grounded encouragement tied to specific progress");
-            sb.AppendLine("   - If there are warning signals (high stress, low energy/motivation), acknowledge them briefly and suggest gentler pacing");
-            sb.AppendLine();
-            sb.AppendLine("3. Agenda:");
-            sb.AppendLine("   - Compact timeline/list of today's events and planned tasks");
-            sb.AppendLine("   - Surface [*] and [!] tasks prominently");
-            sb.AppendLine();
-            sb.AppendLine("4. Keep in mind:");
-            sb.AppendLine("   - 1 short line on what to deprioritize/ignore today to reduce overload");
-            sb.AppendLine("   - 1 compact metrics line only if meaningful");
-            sb.AppendLine();
-            sb.AppendLine("Keep total length concise and useful, not verbose.");
-        }
-        else if (hasObsidianAnalysis && period == "weekly")
-        {
-            sb.AppendLine();
-            sb.AppendLine("LANGUAGE: Write the ENTIRE summary in a single language. Match the language of the custom skill instructions. If no custom instructions are provided, default to English. Do NOT mix languages.");
-            sb.AppendLine("Output a concise summary of what happened during this period.");
-            sb.AppendLine("Write it as natural flowing text without section headings.");
-            sb.AppendLine();
-            sb.AppendLine("Include relevant insights from the analysis below:");
-            sb.AppendLine("- Weekly trends in energy/motivation/stress");
-            sb.AppendLine("- Habit activity patterns");
-            sb.AppendLine("- Task completion progress");
-            sb.AppendLine("- Recurring themes from journal entries");
-        }
-        else
-        {
-            sb.AppendLine();
-            sb.AppendLine("LANGUAGE: Write the ENTIRE summary in a single language. Match the language of the custom skill instructions. If no custom instructions are provided, default to English. Do NOT mix languages.");
-            sb.AppendLine("Output a concise summary of what happened during this period.");
-            sb.AppendLine("Write it as natural flowing text without section headings.");
-            sb.AppendLine("Focus on facts and events. Do NOT include action items, advice, recommendations, or suggestions.");
-        }
-
         if (!string.IsNullOrWhiteSpace(custom))
         {
             sb.AppendLine();
+            sb.AppendLine("=== SKILL INSTRUCTIONS ===");
             sb.AppendLine(custom.Trim());
         }
 
@@ -402,7 +349,7 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         }
 
         // Include Obsidian analysis directly in the prompt (not as a separate context source)
-        if (hasObsidianAnalysis)
+        if (!string.IsNullOrWhiteSpace(obsidianAnalysis))
         {
             sb.AppendLine();
             sb.AppendLine("=== PERSONAL DAILY NOTES DATA ===");
