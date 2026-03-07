@@ -4,7 +4,6 @@ services:
     build:
       context: .
       dockerfile: DigitalButler.Web/Dockerfile
-    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - AI_BASE_URL=${AI_BASE_URL}
@@ -41,6 +40,9 @@ services:
     ports:
       - "7766:8080"
     volumes:
-      - ./data:/data
+      - butler-data:/data
       - /var/headless_vault:/var/notes
     restart: unless-stopped
+
+volumes:
+  butler-data:
