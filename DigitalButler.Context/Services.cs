@@ -12,25 +12,6 @@ public class ContextService
         _repo = repo;
     }
 
-    public async Task<ContextItem> AddPersonalAsync(string body, string? title = null, DateTimeOffset? relevantDate = null, bool isTimeless = true, string? category = null, string? mediaMetadata = null, string? mediaType = null, CancellationToken ct = default)
-    {
-        var item = new ContextItem
-        {
-            Id = Guid.NewGuid(),
-            Source = ContextSource.Personal,
-            Title = string.IsNullOrWhiteSpace(title) ? "Note" : title,
-            Body = body,
-            RelevantDate = relevantDate,
-            IsTimeless = isTimeless,
-            Category = category,
-            MediaMetadata = mediaMetadata,
-            MediaType = mediaType,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
-        return await _repo.InsertAsync(item, ct);
-    }
-
     public Task<List<ContextItem>> GetRecentAsync(int take = 200, CancellationToken ct = default) =>
         _repo.GetRecentAsync(take, ct);
 

@@ -324,14 +324,14 @@ Do not invent items that are not present.
         if (isMotivation)
         {
             sb.AppendLine("Write a short motivational message for the user.");
-            sb.AppendLine("Ground it in the personal context items below, but do NOT quote or list the items.");
+            sb.AppendLine("Ground it in the context items below, especially Obsidian notes, but do NOT quote or list the items.");
             sb.AppendLine("Do not output meta-commentary like 'contains' or 'the notes say'.");
             sb.AppendLine("Keep it concise (3-8 sentences), no bullet list.");
         }
         else if (isActivities)
         {
             sb.AppendLine("Suggest what the user could do next.");
-            sb.AppendLine("Ground it in the personal context items below.");
+            sb.AppendLine("Ground it in the context items below, especially Obsidian notes.");
             sb.AppendLine("Return 3-7 bullet points, each with a short rationale.");
             sb.AppendLine("Do not quote the items verbatim.");
         }
@@ -426,7 +426,7 @@ Do not invent items that are not present.
         {
             ContextSource.GoogleCalendar => "Google Calendar",
             ContextSource.Gmail => "Gmail",
-            ContextSource.Personal => "Personal",
+            ContextSource.Obsidian => "Obsidian",
             ContextSource.Other => "Other",
             _ => source.ToString()
         };

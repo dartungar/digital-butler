@@ -5,6 +5,8 @@ using DigitalButler.Skills.VaultSearch;
 using DigitalButler.Telegram.Skills;
 using DigitalButler.Telegram.State;
 using DigitalButler.Telegram.UI;
+using System.Globalization;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Telegram.Bot;
@@ -15,10 +17,13 @@ namespace DigitalButler.Telegram.Handlers;
 
 public sealed class TextMessageHandler : ITextMessageHandler
 {
+    private static readonly Regex ObsidianPrefixRegex = new(
+        @"^(?:please\s+)?(?:add|save|put)\s+(?:this\s+)?(?:note|message|text|item|photo|picture|image)?\s*(?:to|in|into)?\s*obsidian\s*[:\-–]?\s*",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private readonly ILogger<TextMessageHandler> _logger;
     private readonly long _allowedUserId;
     private readonly ConversationStateManager _stateManager;
-    private readonly ContextService _contextService;
     private readonly ISkillRouter _skillRouter;
     private readonly IDateQueryTranslator _dateTranslator;
     private readonly ISummarySkillExecutor _summaryExecutor;
@@ -29,12 +34,12 @@ public sealed class TextMessageHandler : ITextMessageHandler
     private readonly IVaultSearchSkillExecutor _vaultSearchExecutor;
     private readonly IVaultSearchService _vaultSearchService;
     private readonly IManualSyncRunner _syncRunner;
+    private readonly IObsidianCaptureService _obsidianCaptureService;
 
     public TextMessageHandler(
         ILogger<TextMessageHandler> logger,
         IConfiguration config,
         ConversationStateManager stateManager,
-        ContextService contextService,
         ISkillRouter skillRouter,
         IDateQueryTranslator dateTranslator,
         ISummarySkillExecutor summaryExecutor,
@@ -44,11 +49,11 @@ public sealed class TextMessageHandler : ITextMessageHandler
         ICalendarEventSkillExecutor calendarExecutor,
         IVaultSearchSkillExecutor vaultSearchExecutor,
         IVaultSearchService vaultSearchService,
-        IManualSyncRunner syncRunner)
+        IManualSyncRunner syncRunner,
+        IObsidianCaptureService obsidianCaptureService)
     {
         _logger = logger;
         _stateManager = stateManager;
-        _contextService = contextService;
         _skillRouter = skillRouter;
         _dateTranslator = dateTranslator;
         _summaryExecutor = summaryExecutor;
@@ -59,6 +64,7 @@ public sealed class TextMessageHandler : ITextMessageHandler
         _vaultSearchExecutor = vaultSearchExecutor;
         _vaultSearchService = vaultSearchService;
         _syncRunner = syncRunner;
+        _obsidianCaptureService = obsidianCaptureService;
 
         var allowedUserIdStr = config["TELEGRAM_ALLOWED_USER_ID"];
         _allowedUserId = string.IsNullOrWhiteSpace(allowedUserIdStr)
@@ -88,6 +94,12 @@ public sealed class TextMessageHandler : ITextMessageHandler
         {
             _stateManager.ClearAwaitingDrawingSubject(chatId);
             await HandleDrawingReferenceAsync(bot, chatId, text, ct);
+            return;
+        }
+
+        if (_stateManager.IsAwaitingObsidianDate(chatId) && !text.StartsWith("/", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleObsidianDateInputAsync(bot, chatId, text, ct);
             return;
         }
 
@@ -131,11 +143,10 @@ public sealed class TextMessageHandler : ITextMessageHandler
             var content = text[4..].Trim();
             if (string.IsNullOrWhiteSpace(content))
             {
-                await SendWithKeyboardAsync(bot, chatId, "Usage: /add your note", ct);
+                await SendWithKeyboardAsync(bot, chatId, "Just send the text normally. If it doesn't match any skill, I'll offer to add it to Obsidian.", ct);
                 return;
             }
-            await _contextService.AddPersonalAsync(content, ct: ct);
-            await SendWithKeyboardAsync(bot, chatId, "Saved", ct);
+            await PromptObsidianDestinationAsync(bot, chatId, new ObsidianCaptureRequest { TextContent = content }, ct);
             return;
         }
 
@@ -211,7 +222,7 @@ public sealed class TextMessageHandler : ITextMessageHandler
         // Plain text: route to skill using AI
         if (!text.StartsWith("/", StringComparison.OrdinalIgnoreCase))
         {
-            await HandleSkillRoutingAsync(bot, chatId, text, ct);
+            await PromptIncomingActionAsync(bot, chatId, text, ct);
             return;
         }
 
@@ -505,6 +516,17 @@ public sealed class TextMessageHandler : ITextMessageHandler
                     await HandleVaultSearchAsync(bot, chatId, searchQuery, ct);
                 }
                 break;
+            case ButlerSkill.AddToObsidian:
+                await PromptObsidianDestinationAsync(bot, chatId, CreateObsidianCaptureRequest(text), ct);
+                break;
+            case ButlerSkill.Unknown:
+                await PromptToAddToObsidianAsync(
+                    bot,
+                    chatId,
+                    CreateObsidianCaptureRequest(text),
+                    "I didn't match that to a Butler skill. Add it to Obsidian?",
+                    ct);
+                break;
             case ButlerSkill.DailySummary:
                 await HandleSummaryWithEnrichmentAsync(bot, chatId, weekly: false, vaultQuery, startDate, endDate, ct);
                 break;
@@ -512,9 +534,39 @@ public sealed class TextMessageHandler : ITextMessageHandler
                 await HandleSummaryWithEnrichmentAsync(bot, chatId, weekly: true, vaultQuery, startDate, endDate, ct);
                 break;
             default:
-                await HandleSummaryWithEnrichmentAsync(bot, chatId, weekly: false, vaultQuery, startDate, endDate, ct);
+                await PromptToAddToObsidianAsync(
+                    bot,
+                    chatId,
+                    CreateObsidianCaptureRequest(text),
+                    "I didn't match that to a Butler skill. Add it to Obsidian?",
+                    ct);
                 break;
         }
+    }
+
+    private async Task PromptIncomingActionAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)
+    {
+        var request = CreateObsidianCaptureRequest(text);
+        if (!request.HasContent)
+        {
+            await SendWithKeyboardAsync(bot, chatId, "There is nothing to process.", ct);
+            return;
+        }
+
+        _stateManager.SetPendingIncomingChoice(chatId, new PendingIncomingChoice
+        {
+            Kind = PendingIncomingKind.Text,
+            RoutingText = text,
+            CaptureRequest = request,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+        _stateManager.ClearPendingObsidianCapture(chatId);
+        _stateManager.ClearAwaitingObsidianDate(chatId);
+
+        await bot.SendTextMessageAsync(chatId,
+            "Should I try to find a Butler skill for this text, or add it to Obsidian?",
+            replyMarkup: KeyboardFactory.BuildIncomingActionKeyboard(),
+            cancellationToken: ct);
     }
 
     private async Task HandleSummaryWithEnrichmentAsync(
@@ -574,6 +626,121 @@ public sealed class TextMessageHandler : ITextMessageHandler
             _logger.LogWarning(ex, "Failed to generate motivation");
             await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), ct);
         }
+    }
+
+    private async Task PromptObsidianDestinationAsync(
+        ITelegramBotClient bot,
+        long chatId,
+        ObsidianCaptureRequest request,
+        CancellationToken ct)
+    {
+        if (!request.HasContent)
+        {
+            await SendWithKeyboardAsync(bot, chatId, "There is nothing to add to Obsidian.", ct);
+            return;
+        }
+
+        _stateManager.SetPendingObsidianCapture(chatId, new PendingObsidianCapture
+        {
+            Request = request,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+        _stateManager.ClearAwaitingObsidianDate(chatId);
+
+        await bot.SendTextMessageAsync(chatId,
+            "Where should I add this in Obsidian?",
+            replyMarkup: KeyboardFactory.BuildObsidianDestinationKeyboard(),
+            cancellationToken: ct);
+    }
+
+    private async Task PromptToAddToObsidianAsync(
+        ITelegramBotClient bot,
+        long chatId,
+        ObsidianCaptureRequest request,
+        string prompt,
+        CancellationToken ct)
+    {
+        if (!request.HasContent)
+        {
+            await SendWithKeyboardAsync(bot, chatId, "There is nothing to add to Obsidian.", ct);
+            return;
+        }
+
+        _stateManager.SetPendingObsidianCapture(chatId, new PendingObsidianCapture
+        {
+            Request = request,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+        _stateManager.ClearAwaitingObsidianDate(chatId);
+
+        await bot.SendTextMessageAsync(chatId,
+            prompt,
+            replyMarkup: KeyboardFactory.BuildObsidianConfirmKeyboard(),
+            cancellationToken: ct);
+    }
+
+    private async Task HandleObsidianDateInputAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)
+    {
+        var pending = _stateManager.PeekPendingObsidianCapture(chatId);
+        if (pending is null)
+        {
+            _stateManager.ClearAwaitingObsidianDate(chatId);
+            await SendWithKeyboardAsync(bot, chatId, "The pending Obsidian save expired. Please try again.", ct);
+            return;
+        }
+
+        if (!TryParseObsidianDate(text, out var date))
+        {
+            await SendWithKeyboardAsync(bot, chatId, "Please send the date as YYYY-MM-DD, for example 2026-03-07.", ct);
+            return;
+        }
+
+        await SendWithKeyboardAsync(bot, chatId, $"Adding to daily note for {date:yyyy-MM-dd}...", ct);
+
+        try
+        {
+            var result = await _obsidianCaptureService.AppendToDailyNoteAsync(date, pending.Request, ct);
+            _stateManager.ClearPendingObsidianCapture(chatId);
+            await SendWithKeyboardAsync(bot, chatId, BuildObsidianSavedMessage(result), ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to save content to Obsidian daily note for {Date}", date);
+            await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), ct);
+        }
+    }
+
+    private static ObsidianCaptureRequest CreateObsidianCaptureRequest(string text)
+    {
+        var trimmed = text.Trim();
+        var cleaned = ObsidianPrefixRegex.Replace(trimmed, string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(cleaned) && string.Equals(cleaned, trimmed, StringComparison.Ordinal))
+        {
+            cleaned = trimmed;
+        }
+
+        return new ObsidianCaptureRequest
+        {
+            TextContent = string.IsNullOrWhiteSpace(cleaned) ? null : cleaned
+        };
+    }
+
+    private static bool TryParseObsidianDate(string text, out DateOnly date)
+    {
+        var trimmed = text.Trim();
+        return DateOnly.TryParseExact(trimmed, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date)
+            || DateOnly.TryParse(trimmed, CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+    }
+
+    private static string BuildObsidianSavedMessage(ObsidianCaptureResult result)
+    {
+        var message = $"Saved to {result.TargetDescription}: {result.NotePath}";
+        if (!string.IsNullOrWhiteSpace(result.MediaFileName))
+        {
+            message += $"\nMedia: {result.MediaFileName}";
+        }
+
+        return message;
     }
 
     private static Task SendWithKeyboardAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)

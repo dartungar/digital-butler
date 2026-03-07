@@ -1,0 +1,118 @@
+@page "/skills/add-to-obsidian"
+@using DigitalButler.Common
+@using DigitalButler.Context
+@using Microsoft.Extensions.Options
+@inject ObsidianCaptureSettingsService SettingsService
+@inject IOptionsSnapshot<ObsidianOptions> ObsidianOptionsSnapshot
+
+<PageTitle>Add to Obsidian</PageTitle>
+
+<div class="content">
+    <h3 class="title is-3">Add to Obsidian</h3>
+    <p class="subtitle is-6">Configure where Telegram content should be written inside the Obsidian vault.</p>
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Storage Settings</h5>
+        <p class="subtitle is-6">Paths are relative to the vault root and must stay inside the vault.</p>
+    </div>
+
+    @if (_settings is null)
+    {
+        <p>Loading...</p>
+    }
+    else
+    {
+        <EditForm Model="this" OnValidSubmit="SaveAsync">
+            <div class="field">
+                <label class="label">Inbox note path</label>
+                <div class="control">
+                    <InputText class="input" @bind-Value="_settings.InboxNotePath" placeholder="Inbox.md" />
+                </div>
+                <p class="help">Example: <strong>Inbox.md</strong> or <strong>00 inbox/Inbox.md</strong>.</p>
+            </div>
+
+            <div class="field">
+                <label class="label">Media folder path</label>
+                <div class="control">
+                    <InputText class="input" @bind-Value="_settings.MediaFolderPath" placeholder="assets/telegram" />
+                </div>
+                <p class="help">Pictures from Telegram will be stored here and linked as <strong>![[filename]]</strong>.</p>
+            </div>
+
+            <div class="field">
+                <label class="label">Daily note text template</label>
+                <div class="control">
+                    <InputTextArea class="textarea" @bind-Value="_settings.DailyNoteTextTemplate" />
+                </div>
+                <p class="help">Used only when Telegram message text exists. Use <strong>{{text}}</strong> as the text placeholder.</p>
+            </div>
+
+            <div class="field">
+                <label class="label">Daily note media template</label>
+                <div class="control">
+                    <InputTextArea class="textarea" @bind-Value="_settings.DailyNoteMediaTemplate" />
+                </div>
+                <p class="help">Used only when media exists. Use <strong>{{media}}</strong> for the Obsidian embed.</p>
+            </div>
+
+            <div class="field">
+                <label class="label">Inbox text template</label>
+                <div class="control">
+                    <InputTextArea class="textarea" @bind-Value="_settings.InboxNoteTextTemplate" />
+                </div>
+                <p class="help">Used only when Telegram message text exists for inbox saves.</p>
+            </div>
+
+            <div class="field">
+                <label class="label">Inbox media template</label>
+                <div class="control">
+                    <InputTextArea class="textarea" @bind-Value="_settings.InboxNoteMediaTemplate" />
+                </div>
+                <p class="help">Used only when media exists for inbox saves. Missing placeholders become empty strings.</p>
+            </div>
+
+            <div class="buttons">
+                <button class="button is-primary" type="submit">Save Settings</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_message))
+            {
+                <div class="notification is-info is-light">@_message</div>
+            }
+        </EditForm>
+    }
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Current Obsidian Setup</h5>
+        <ul>
+            <li><strong>Vault path:</strong> @ObsidianOptionsSnapshot.Value.VaultPath</li>
+            <li><strong>Daily notes pattern:</strong> @ObsidianOptionsSnapshot.Value.DailyNotesPattern</li>
+        </ul>
+        <p class="has-text-grey is-size-7">Daily-note captures are appended to the bottom of the matching daily note file. Defaults are <strong>{{text}}</strong> for text and <strong>{{media}}</strong> for media.</p>
+    </div>
+</div>
+
+@code {
+    private ObsidianCaptureSettings? _settings;
+    private string? _message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = await SettingsService.GetAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        await SettingsService.SaveAsync(_settings);
+        _message = "Saved.";
+    }
+}

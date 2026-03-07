@@ -2,11 +2,10 @@ namespace DigitalButler.Common;
 
 public enum ContextSource
 {
-    GoogleCalendar,
-    Gmail,
-    Personal,
-    Obsidian,
-    Other
+    GoogleCalendar = 0,
+    Gmail = 1,
+    Obsidian = 3,
+    Other = 4
 }
 
 public class ContextItem
@@ -56,13 +55,15 @@ public class SummarySchedule
 
 public enum ButlerSkill
 {
+    Unknown = -1,
     DailySummary = 0,    // Was Summary
     Motivation = 1,
     Activities = 2,
     DrawingReference = 3,
     CalendarEvent = 4,
     WeeklySummary = 5,
-    VaultSearch = 6      // Search Obsidian vault
+    VaultSearch = 6,     // Search Obsidian vault
+    AddToObsidian = 7
 }
 
 /// <summary>
@@ -141,9 +142,10 @@ public static class SkillContextDefaults
         {
             ButlerSkill.DailySummary => ContextSourceMask.All(),
             ButlerSkill.WeeklySummary => ContextSourceMask.All(),
-            ButlerSkill.Motivation => ContextSourceMask.For(ContextSource.Personal, ContextSource.Obsidian),
-            ButlerSkill.Activities => ContextSourceMask.For(ContextSource.Personal, ContextSource.Obsidian),
+            ButlerSkill.Motivation => ContextSourceMask.For(ContextSource.Obsidian),
+            ButlerSkill.Activities => ContextSourceMask.For(ContextSource.Obsidian),
             ButlerSkill.CalendarEvent => 0, // No context sources needed for event creation
+            ButlerSkill.AddToObsidian => 0,
             _ => ContextSourceMask.All()
         };
 
@@ -172,7 +174,7 @@ public static class SkillInstructionDefaults
                    - If there are no agenda items, write exactly: - No agenda items
 
                 2. Stats overview
-                   - Include only concise factual metrics/counts from the available personal stats/analysis
+                   - Include only concise factual metrics/counts from the available Obsidian stats/analysis
                    - Prefer compact bullets for metrics, habits, and task counts when available
                    - No interpretation, no recommendations, no encouragement, no prose paragraph
                    - If there are no stats, write exactly: - No stats data
@@ -189,7 +191,7 @@ public static class SkillInstructionDefaults
                 Write it as natural flowing text without section headings.
                 Focus on facts and events. Do NOT include action items, advice, recommendations, or suggestions.
 
-                If personal notes analysis is available, include relevant insights from:
+                If Obsidian notes analysis is available, include relevant insights from:
                 - Weekly trends in energy/motivation/stress
                 - Habit activity patterns
                 - Task completion progress
@@ -213,6 +215,34 @@ public class AiTaskSetting
     public string? Model { get; set; }
     public string? ApiKey { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class ObsidianCaptureSettings
+{
+    public string InboxNotePath { get; set; } = "Inbox.md";
+    public string MediaFolderPath { get; set; } = "assets/telegram";
+    public string DailyNoteTextTemplate { get; set; } = "{{text}}";
+    public string DailyNoteMediaTemplate { get; set; } = "{{media}}";
+    public string InboxNoteTextTemplate { get; set; } = "{{text}}";
+    public string InboxNoteMediaTemplate { get; set; } = "{{media}}";
+}
+
+public sealed class ObsidianCaptureRequest
+{
+    public string? TextContent { get; set; }
+    public byte[]? MediaBytes { get; set; }
+    public string MediaFileExtension { get; set; } = ".jpg";
+
+    public bool HasContent =>
+        !string.IsNullOrWhiteSpace(TextContent) ||
+        (MediaBytes is { Length: > 0 });
+}
+
+public sealed class ObsidianCaptureResult
+{
+    public string TargetDescription { get; set; } = string.Empty;
+    public string NotePath { get; set; } = string.Empty;
+    public string? MediaFileName { get; set; }
 }
 
 public class GoogleCalendarFeed

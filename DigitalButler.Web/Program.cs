@@ -229,7 +229,6 @@ builder.Services.AddScoped<AiSettingsResolver>();
 builder.Services.AddHostedService<SchedulerService>();
 
 // Context sources
-builder.Services.AddScoped<PersonalContextSource>();
 builder.Services.AddHttpClient<GoogleCalendarContextSource>();
 builder.Services.AddScoped<GmailContextSource>();
 builder.Services.AddScoped<ObsidianDailyNotesContextSource>();
@@ -269,6 +268,8 @@ builder.Services.AddScoped<ContextService>();
 builder.Services.AddScoped<InstructionService>();
 builder.Services.AddScoped<SkillInstructionService>();
 builder.Services.AddScoped<AiTaskSettingsService>();
+builder.Services.AddScoped<ObsidianCaptureSettingsService>();
+builder.Services.AddScoped<IObsidianCaptureService, ObsidianCaptureService>();
 builder.Services.AddScoped<TimeZoneService>();
 builder.Services.AddSingleton<IManualSyncRunner, ManualSyncRunner>();
 builder.Services.AddHealthChecks();

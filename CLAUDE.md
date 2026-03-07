@@ -4,7 +4,7 @@
 
 Digital Butler is a personal AI assistant Telegram bot built with .NET 10.0.
 It is used STRICTLY by its creator (it has only 1 user - me).
-It aggregates information from multiple context sources (Google Calendar, Gmail, personal notes, Obsidian vault) and uses AI to provide daily summaries, motivational messages, personalized recommendations, and semantic search over notes.
+It aggregates information from multiple context sources (Google Calendar, Gmail, Obsidian vault) and uses AI to provide daily summaries, motivational messages, personalized recommendations, and semantic search over notes.
 
 ## Solution Structure
 
@@ -24,7 +24,7 @@ DigitalButler.sln
 DigitalButler.Web (entry point)
 ├── Telegram (bot service, handlers, skill executors)
 ├── Skills (AI routing, summarization, vault search, augmentation)
-├── Context (sources: Calendar, Gmail, Personal, Obsidian)
+├── Context (sources: Calendar, Gmail, Obsidian)
 ├── Data (SQLite + Dapper repositories)
 └── Common (models, enums, interfaces)
 ```
@@ -34,7 +34,6 @@ DigitalButler.Web (entry point)
 ### Context Sources (`DigitalButler.Context`)
 - **GoogleCalendarContextSource** - Parses iCal feeds via Ical.Net
 - **GmailContextSource** - Fetches emails via MailKit
-- **PersonalContextSource** - User-added notes via Telegram/UI
 - **ObsidianDailyNotesContextSource** - Parses daily notes from synced Obsidian vault (YAML frontmatter + markdown)
 - **ObsidianAnalysisService** - Aggregates and compares metrics from daily notes
 

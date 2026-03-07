@@ -7,14 +7,10 @@
 
 <div class="content">
     <h3 class="title is-3">All Context Items</h3>
-    <p class="subtitle is-6">View, add, edit, and delete all context items.</p>
+    <p class="subtitle is-6">View, edit, and delete Butler context items.</p>
 </div>
 
 <div class="buttons">
-    <button class="button is-primary" type="button" title="Add" aria-label="Add" @onclick="OpenAdd">
-        <span class="icon" aria-hidden="true">+</span>
-    </button>
-
     <button class="button is-danger is-light" type="button" title="Delete selected" aria-label="Delete selected"
             disabled="@(_selectedIds.Count == 0)" @onclick="OpenDeleteSelected">
         <span class="icon" aria-hidden="true">✖</span>
@@ -122,72 +118,7 @@ else
         </header>
 
         <section class="modal-card-body">
-            @if (_modalMode == ContextModalMode.Add)
-            {
-                @if (!string.IsNullOrWhiteSpace(_addMessage))
-                {
-                    <div class="notification is-info is-light">@_addMessage</div>
-                }
-
-                <EditForm Model="this" FormName="add-context" OnValidSubmit="AddAsync">
-                    <div class="field">
-                        <label class="label">Title</label>
-                        <div class="control">
-                            <InputText class="input" @bind-Value="_newTitle" />
-                        </div>
-                    </div>
-
-                    <div class="columns">
-                        <div class="column">
-                            <div class="field">
-                                <label class="label">Relevant date</label>
-                                <div class="control">
-                                    <InputDate class="input" TValue="DateTime?" @bind-Value="_newRelevantDate" />
-                                </div>
-                                <p class="help">Leave empty to clear.</p>
-                            </div>
-                        </div>
-                        <div class="column">
-                            <div class="field">
-                                <label class="label">Time</label>
-                                <div class="control">
-                                    <InputText class="input" type="time" @bind-Value="_newRelevantTime" />
-                                </div>
-                                <p class="help">Used only when date is set.</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="field">
-                        <label class="label">Body</label>
-                        <div class="control">
-                            <InputTextArea class="textarea" style="min-height: 140px;" @bind-Value="_newBody" />
-                        </div>
-                    </div>
-
-                    <div class="field">
-                        <label class="label">Category</label>
-                        <div class="control">
-                            <InputText class="input" @bind-Value="_newCategory" />
-                        </div>
-                    </div>
-
-                    <div class="field">
-                        <div class="control">
-                            <label class="checkbox">
-                                <InputCheckbox @bind-Value="_newIsTimeless" />
-                                Timeless
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="buttons">
-                        <button class="button is-primary" type="submit" disabled="@_adding">Save</button>
-                        <button class="button" type="button" @onclick="CloseModal" disabled="@_adding">Cancel</button>
-                    </div>
-                </EditForm>
-            }
-            else if (_modalMode == ContextModalMode.Edit && _edit is not null)
+            @if (_modalMode == ContextModalMode.Edit && _edit is not null)
             {
                 <div class="content">
                     <p class="subtitle is-6">Selected item: <strong>@_edit.Source</strong></p>
@@ -319,15 +250,6 @@ else
     private bool _saving;
     private string? _saveMessage;
 
-    private string _newTitle = "Note";
-    private string _newBody = string.Empty;
-    private string? _newCategory;
-    private bool _newIsTimeless = true;
-    private DateTime? _newRelevantDate;
-    private string _newRelevantTime = "";
-    private bool _adding;
-    private string? _addMessage;
-
     private bool _deleting;
 
     private bool _modalOpen;
@@ -401,15 +323,6 @@ else
         _saveMessage = null;
     }
 
-    private void OpenAdd()
-    {
-        _modalMode = ContextModalMode.Add;
-        _modalTitle = "Add context item";
-        _modalOpen = true;
-        _addMessage = null;
-        _deleteCancelReturnMode = null;
-    }
-
     private void OpenEdit(ContextItem item)
     {
         Select(item);
@@ -432,7 +345,6 @@ else
     {
         _modalOpen = false;
         _saveMessage = null;
-        _addMessage = null;
         _deleteCancelReturnMode = null;
         _deleteSourceCount = null;
     }
@@ -529,45 +441,6 @@ else
         finally
         {
             _saving = false;
-        }
-    }
-
-    private async Task AddAsync()
-    {
-        _addMessage = null;
-        if (string.IsNullOrWhiteSpace(_newBody))
-        {
-            _addMessage = "Body is required.";
-            return;
-        }
-
-        if (!TryBuildRelevantDate(_newRelevantDate, _newRelevantTime, out var relevantDate, out var error))
-        {
-            _addMessage = error;
-            return;
-        }
-
-        _adding = true;
-        try
-        {
-            var added = await ContextService.AddPersonalAsync(
-                body: _newBody,
-                title: _newTitle,
-                relevantDate: relevantDate,
-                isTimeless: _newIsTimeless,
-                category: _newCategory
-            );
-
-            _items ??= new List<ContextItem>();
-            _items.Insert(0, added);
-
-            _newBody = string.Empty;
-            _addMessage = "Added.";
-            _modalOpen = false;
-        }
-        finally
-        {
-            _adding = false;
         }
     }
 
@@ -682,7 +555,6 @@ else
 
     private enum ContextModalMode
     {
-        Add,
         Edit,
         DeleteConfirm,
         DeleteSelectedConfirm,

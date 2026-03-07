@@ -46,7 +46,6 @@ public sealed class MotivationSkillExecutor : IMotivationSkillExecutor
         DateOnly? endDate,
         CancellationToken ct)
     {
-        var tz = await _tzService.GetTimeZoneInfoAsync(ct);
         var items = await _contextService.GetRelevantAsync(daysBack: 30, take: 250, ct: ct);
         var citations = new List<ObsidianCitation>();
 
@@ -80,7 +79,7 @@ public sealed class MotivationSkillExecutor : IMotivationSkillExecutor
             {
                 items.Add(new ContextItem
                 {
-                    Source = ContextSource.Personal,
+                    Source = ContextSource.Other,
                     Title = "AI self-thought",
                     Body = snippet.Trim(),
                     IsTimeless = true,
@@ -90,7 +89,7 @@ public sealed class MotivationSkillExecutor : IMotivationSkillExecutor
             }
         }
 
-        // Motivation should be driven by Personal context and per-skill instructions only.
+        // Motivation should be driven by Obsidian context and per-skill instructions.
         var instructionsBySource = new Dictionary<ContextSource, string>();
         var prompt = BuildSkillPrompt(userQuery, cfg?.Content, citations.Count > 0);
         var result = await _summarizer.SummarizeAsync(items, instructionsBySource, "motivation", prompt, ct);
@@ -121,12 +120,12 @@ public sealed class MotivationSkillExecutor : IMotivationSkillExecutor
             sb.AppendLine($"User's message: \"{userQuery}\"");
             sb.AppendLine();
             sb.AppendLine("Write a motivational message that directly addresses what the user said.");
-            sb.AppendLine("If the user's message relates to something in their Personal context, incorporate that context naturally.");
+            sb.AppendLine("If the user's message relates to something in their Obsidian notes, incorporate that context naturally.");
             sb.AppendLine("If the user's message is generic or unrelated to their context, focus on addressing their specific feeling or situation without forcing context references.");
         }
         else
         {
-            sb.AppendLine("Write a short motivational message grounded in Personal context items.");
+            sb.AppendLine("Write a short motivational message grounded in Obsidian notes and recent context items.");
         }
 
         if (hasVaultContext)
@@ -137,7 +136,7 @@ public sealed class MotivationSkillExecutor : IMotivationSkillExecutor
         }
 
         sb.AppendLine();
-        sb.AppendLine("Ignore calendar/events/emails unless they are part of Personal context.");
+        sb.AppendLine("Ignore calendar/events/emails unless they materially help personalize the message.");
         sb.AppendLine("Do not summarize the notes; do not quote them; use them only as inspiration.");
         sb.AppendLine("Do not mention that you are an AI or that you were given 'context items'.");
 

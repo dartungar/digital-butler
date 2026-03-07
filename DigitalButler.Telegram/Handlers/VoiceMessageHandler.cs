@@ -1,7 +1,5 @@
 using DigitalButler.Common;
-using DigitalButler.Context;
-using DigitalButler.Skills;
-using DigitalButler.Telegram.Skills;
+using DigitalButler.Telegram.State;
 using DigitalButler.Telegram.UI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -14,36 +12,15 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
 {
     private readonly ILogger<VoiceMessageHandler> _logger;
     private readonly long _allowedUserId;
-    private readonly IMediaDownloadService _mediaDownloadService;
-    private readonly IAudioTranscriptionService _transcriptionService;
-    private readonly ContextService _contextService;
-    private readonly ISkillRouter _skillRouter;
-    private readonly ISummarySkillExecutor _summaryExecutor;
-    private readonly IMotivationSkillExecutor _motivationExecutor;
-    private readonly IActivitiesSkillExecutor _activitiesExecutor;
-    private readonly ICalendarEventSkillExecutor _calendarExecutor;
+    private readonly ConversationStateManager _stateManager;
 
     public VoiceMessageHandler(
         ILogger<VoiceMessageHandler> logger,
         IConfiguration config,
-        IMediaDownloadService mediaDownloadService,
-        IAudioTranscriptionService transcriptionService,
-        ContextService contextService,
-        ISkillRouter skillRouter,
-        ISummarySkillExecutor summaryExecutor,
-        IMotivationSkillExecutor motivationExecutor,
-        IActivitiesSkillExecutor activitiesExecutor,
-        ICalendarEventSkillExecutor calendarExecutor)
+        ConversationStateManager stateManager)
     {
         _logger = logger;
-        _mediaDownloadService = mediaDownloadService;
-        _transcriptionService = transcriptionService;
-        _contextService = contextService;
-        _skillRouter = skillRouter;
-        _summaryExecutor = summaryExecutor;
-        _motivationExecutor = motivationExecutor;
-        _activitiesExecutor = activitiesExecutor;
-        _calendarExecutor = calendarExecutor;
+        _stateManager = stateManager;
 
         var allowedUserIdStr = config["TELEGRAM_ALLOWED_USER_ID"];
         _allowedUserId = string.IsNullOrWhiteSpace(allowedUserIdStr)
@@ -67,78 +44,9 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
             return;
         }
 
-        await SendWithKeyboardAsync(bot, chatId, "Transcribing voice message...", ct);
-
         try
         {
-            // Download audio file
-            var audioData = await _mediaDownloadService.DownloadFileAsync(bot, message.Voice.FileId, ct);
-
-            // Transcribe
-            var result = await _transcriptionService.TranscribeAsync(audioData, $"voice_{message.Voice.FileId}.ogg", ct);
-            var transcribedText = result.Text;
-
-            if (string.IsNullOrWhiteSpace(transcribedText))
-            {
-                await SendWithKeyboardAsync(bot, chatId, "Could not transcribe the voice message.", ct);
-                return;
-            }
-
-            // Route through skill router
-            var route = await _skillRouter.RouteAsync(transcribedText, ct);
-
-            switch (route.Skill)
-            {
-                case ButlerSkill.CalendarEvent:
-                    await SendWithKeyboardAsync(bot, chatId, $"Transcribed: \"{transcribedText}\"\n\nCreating event...", ct);
-                    var eventText = CalendarEventSkillExecutor.TryExtractEventText(transcribedText) ?? transcribedText;
-                    await HandleCalendarEventAsync(bot, chatId, eventText, ct);
-                    break;
-
-                case ButlerSkill.Motivation:
-                    await SendWithKeyboardAsync(bot, chatId, $"Transcribed: \"{transcribedText}\"\n\nGenerating motivation...", ct);
-                    var motivation = await _motivationExecutor.ExecuteAsync(userQuery: transcribedText, ct);
-                    await bot.SendTextMessageAsync(chatId, TruncateForTelegram(motivation ?? "No motivation available."),
-                        replyMarkup: KeyboardFactory.BuildMotivationRefreshKeyboard(),
-                        cancellationToken: ct);
-                    break;
-
-                case ButlerSkill.Activities:
-                    await SendWithKeyboardAsync(bot, chatId, $"Transcribed: \"{transcribedText}\"\n\nGenerating activities...", ct);
-                    var activities = await _activitiesExecutor.ExecuteAsync(ct);
-                    await bot.SendTextMessageAsync(chatId, TruncateForTelegram(activities ?? "No activities available."),
-                        replyMarkup: KeyboardFactory.BuildActivitiesRefreshKeyboard(),
-                        cancellationToken: ct);
-                    break;
-
-                case ButlerSkill.DailySummary:
-                    await SendWithKeyboardAsync(bot, chatId, $"Transcribed: \"{transcribedText}\"\n\nGenerating daily summary...", ct);
-                    var dailySummary = await _summaryExecutor.ExecuteAsync(weekly: false, "on-demand-daily", ct);
-                    await bot.SendTextMessageAsync(chatId, TruncateForTelegram(dailySummary ?? "No summary available."),
-                        replyMarkup: KeyboardFactory.BuildSummaryRefreshKeyboard(false),
-                        cancellationToken: ct);
-                    break;
-
-                case ButlerSkill.WeeklySummary:
-                    await SendWithKeyboardAsync(bot, chatId, $"Transcribed: \"{transcribedText}\"\n\nGenerating weekly summary...", ct);
-                    var weeklySummary = await _summaryExecutor.ExecuteAsync(weekly: true, "on-demand-weekly", ct);
-                    await bot.SendTextMessageAsync(chatId, TruncateForTelegram(weeklySummary ?? "No summary available."),
-                        replyMarkup: KeyboardFactory.BuildSummaryRefreshKeyboard(true),
-                        cancellationToken: ct);
-                    break;
-
-                case ButlerSkill.DrawingReference:
-                default:
-                    // Fallback: save to context
-                    await _contextService.AddPersonalAsync(
-                        body: transcribedText,
-                        title: "Voice note",
-                        mediaMetadata: $"Transcription confidence: {result.Confidence:F2}",
-                        mediaType: "voice",
-                        ct: ct);
-                    await SendWithKeyboardAsync(bot, chatId, $"Transcribed and saved:\n\n\"{transcribedText}\"", ct);
-                    break;
-            }
+            await PromptIncomingActionAsync(bot, chatId, message.Voice.FileId, ct);
         }
         catch (Exception ex)
         {
@@ -147,39 +55,21 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
         }
     }
 
-    private async Task HandleCalendarEventAsync(ITelegramBotClient bot, long chatId, string eventText, CancellationToken ct)
+    private async Task PromptIncomingActionAsync(ITelegramBotClient bot, long chatId, string voiceFileId, CancellationToken ct)
     {
-        if (!_calendarExecutor.IsConfigured)
+        _stateManager.SetPendingIncomingChoice(chatId, new PendingIncomingChoice
         {
-            await SendWithKeyboardAsync(bot, chatId,
-                "Google Calendar is not configured.",
-                ct);
-            return;
-        }
+            Kind = PendingIncomingKind.Voice,
+            TelegramFileId = voiceFileId,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+        _stateManager.ClearPendingObsidianCapture(chatId);
+        _stateManager.ClearAwaitingObsidianDate(chatId);
 
-        var result = await _calendarExecutor.ParseEventAsync(eventText, ct);
-        if (result is null)
-        {
-            await SendWithKeyboardAsync(bot, chatId,
-                "I couldn't understand that event.",
-                ct);
-            return;
-        }
-
-        // For voice messages, create the event directly without confirmation
-        var createResult = await _calendarExecutor.CreateEventAsync(result.Parsed, ct);
-        if (createResult.Success)
-        {
-            await SendWithKeyboardAsync(bot, chatId,
-                $"Event created: {result.Parsed.Title}\n{createResult.HtmlLink}",
-                ct);
-        }
-        else
-        {
-            await SendWithKeyboardAsync(bot, chatId,
-                $"Failed to create event: {createResult.Error}",
-                ct);
-        }
+        await bot.SendTextMessageAsync(chatId,
+            "Should I try to find a Butler skill for this voice note, or add it to Obsidian?",
+            replyMarkup: KeyboardFactory.BuildIncomingActionKeyboard(),
+            cancellationToken: ct);
     }
 
     private static Task SendWithKeyboardAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)

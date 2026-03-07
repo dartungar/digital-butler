@@ -197,7 +197,6 @@ public sealed class ContextRepository
     public async Task<int> UpsertByExternalIdAsync(IEnumerable<ContextItem> items, CancellationToken ct = default)
     {
         var list = items
-            .Where(i => i.Source != ContextSource.Personal)
             .Where(i => !string.IsNullOrWhiteSpace(i.ExternalId))
             .ToList();
 

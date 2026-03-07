@@ -127,7 +127,7 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
             {
                 items.Add(new ContextItem
                 {
-                    Source = ContextSource.Personal,
+                    Source = ContextSource.Other,
                     Title = "AI self-thought",
                     Body = snippet.Trim(),
                     IsTimeless = true,
@@ -232,7 +232,6 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         var score = item.Source switch
         {
             ContextSource.GoogleCalendar => 30,
-            ContextSource.Personal => 28,
             ContextSource.Obsidian => 24,
             ContextSource.Gmail => 16,
             _ => 12
@@ -352,7 +351,7 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         if (!string.IsNullOrWhiteSpace(obsidianAnalysis))
         {
             sb.AppendLine();
-            sb.AppendLine("=== PERSONAL DAILY NOTES DATA ===");
+            sb.AppendLine("=== OBSIDIAN DAILY NOTES DATA ===");
             sb.AppendLine(obsidianAnalysis);
         }
 

@@ -3,7 +3,7 @@
 Shared domain, EF Core context, and AI helpers for the digital butler.
 
 ## Models
-- `ContextItem`: stored context from sources (Google Calendar, Gmail, Personal, etc.).
+- `ContextItem`: stored context from sources (Google Calendar, Gmail, Obsidian, etc.).
 - `Instruction`: per-source instructions.
 - `ScheduleConfig`: per-source fetch schedule placeholder.
 - `SummarySchedule`: daily/weekly summary times.

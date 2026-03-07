@@ -10,7 +10,7 @@ public static class KeyboardFactory
         {
             new[] { new KeyboardButton("/daily"), new KeyboardButton("/weekly") },
             new[] { new KeyboardButton("/motivation"), new KeyboardButton("/activities") },
-            new[] { new KeyboardButton("/add ") }
+            new[] { new KeyboardButton("/search"), new KeyboardButton("/sync") }
         })
         {
             ResizeKeyboard = true
@@ -128,6 +128,57 @@ public static class KeyboardFactory
             {
                 InlineKeyboardButton.WithCallbackData("Create Event", "calevent:confirm"),
                 InlineKeyboardButton.WithCallbackData("Cancel", "calevent:reject")
+            }
+        });
+    }
+
+    public static InlineKeyboardMarkup BuildObsidianDestinationKeyboard()
+    {
+        return new InlineKeyboardMarkup(new[]
+        {
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("Today's daily note", "obsidian:today")
+            },
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("Other date's daily note", "obsidian:other_date")
+            },
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("Inbox note", "obsidian:inbox")
+            },
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("Cancel", "obsidian:cancel")
+            }
+        });
+    }
+
+    public static InlineKeyboardMarkup BuildObsidianConfirmKeyboard()
+    {
+        return new InlineKeyboardMarkup(new[]
+        {
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("Add to Obsidian", "obsidian:confirm_add"),
+                InlineKeyboardButton.WithCallbackData("Cancel", "obsidian:cancel")
+            }
+        });
+    }
+
+    public static InlineKeyboardMarkup BuildIncomingActionKeyboard()
+    {
+        return new InlineKeyboardMarkup(new[]
+        {
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("Find skill", "intake:skill"),
+                InlineKeyboardButton.WithCallbackData("Add to Obsidian", "intake:obsidian")
+            },
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("Cancel", "intake:cancel")
             }
         });
     }

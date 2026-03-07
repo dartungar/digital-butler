@@ -1,8 +1,7 @@
 using DigitalButler.Common;
-using DigitalButler.Context;
-using DigitalButler.Skills;
-using DigitalButler.Telegram.Skills;
+using DigitalButler.Telegram.State;
 using DigitalButler.Telegram.UI;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Telegram.Bot;
@@ -12,38 +11,21 @@ namespace DigitalButler.Telegram.Handlers;
 
 public sealed class PhotoMessageHandler : IPhotoMessageHandler
 {
+    private static readonly Regex ObsidianPrefixRegex = new(
+        @"^(?:please\s+)?(?:add|save|put)\s+(?:this\s+)?(?:note|message|text|item|photo|picture|image)?\s*(?:to|in|into)?\s*obsidian\s*[:\-–]?\s*",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private readonly ILogger<PhotoMessageHandler> _logger;
     private readonly long _allowedUserId;
-    private readonly IMediaDownloadService _mediaDownloadService;
-    private readonly IImageAnalysisService _imageAnalysisService;
-    private readonly ContextService _contextService;
-    private readonly ISkillRouter _skillRouter;
-    private readonly ISummarySkillExecutor _summaryExecutor;
-    private readonly IMotivationSkillExecutor _motivationExecutor;
-    private readonly IActivitiesSkillExecutor _activitiesExecutor;
-    private readonly ICalendarEventSkillExecutor _calendarExecutor;
+    private readonly ConversationStateManager _stateManager;
 
     public PhotoMessageHandler(
         ILogger<PhotoMessageHandler> logger,
         IConfiguration config,
-        IMediaDownloadService mediaDownloadService,
-        IImageAnalysisService imageAnalysisService,
-        ContextService contextService,
-        ISkillRouter skillRouter,
-        ISummarySkillExecutor summaryExecutor,
-        IMotivationSkillExecutor motivationExecutor,
-        IActivitiesSkillExecutor activitiesExecutor,
-        ICalendarEventSkillExecutor calendarExecutor)
+        ConversationStateManager stateManager)
     {
         _logger = logger;
-        _mediaDownloadService = mediaDownloadService;
-        _imageAnalysisService = imageAnalysisService;
-        _contextService = contextService;
-        _skillRouter = skillRouter;
-        _summaryExecutor = summaryExecutor;
-        _motivationExecutor = motivationExecutor;
-        _activitiesExecutor = activitiesExecutor;
-        _calendarExecutor = calendarExecutor;
+        _stateManager = stateManager;
 
         var allowedUserIdStr = config["TELEGRAM_ALLOWED_USER_ID"];
         _allowedUserId = string.IsNullOrWhiteSpace(allowedUserIdStr)
@@ -68,83 +50,12 @@ public sealed class PhotoMessageHandler : IPhotoMessageHandler
             return;
         }
 
-        await SendWithKeyboardAsync(bot, chatId, "Analyzing image...", ct);
-
         try
         {
             // Get largest photo
             var largestPhoto = message.Photo.OrderByDescending(p => p.FileSize).First();
 
-            // Download image
-            var imageData = await _mediaDownloadService.DownloadFileAsync(bot, largestPhoto.FileId, ct);
-
-            // Analyze image
-            var result = await _imageAnalysisService.AnalyzeAsync(imageData, caption, ct);
-            var description = result.Description;
-
-            if (string.IsNullOrWhiteSpace(description))
-            {
-                await SendWithKeyboardAsync(bot, chatId, "Could not analyze the image.", ct);
-                return;
-            }
-
-            // Route through skill router - use caption for routing if available
-            var textForRouting = string.IsNullOrWhiteSpace(caption) ? description : caption;
-            var route = await _skillRouter.RouteAsync(textForRouting, ct);
-
-            switch (route.Skill)
-            {
-                case ButlerSkill.CalendarEvent:
-                    var eventText = string.IsNullOrWhiteSpace(caption) ? description : caption;
-                    await HandleCalendarEventAsync(bot, chatId, eventText, ct);
-                    break;
-
-                case ButlerSkill.Motivation:
-                    var motivation = await _motivationExecutor.ExecuteAsync(userQuery: textForRouting, ct);
-                    await bot.SendTextMessageAsync(chatId, TruncateForTelegram(motivation ?? "No motivation available."),
-                        replyMarkup: KeyboardFactory.BuildMotivationRefreshKeyboard(),
-                        cancellationToken: ct);
-                    break;
-
-                case ButlerSkill.Activities:
-                    var activities = await _activitiesExecutor.ExecuteAsync(ct);
-                    await bot.SendTextMessageAsync(chatId, TruncateForTelegram(activities ?? "No activities available."),
-                        replyMarkup: KeyboardFactory.BuildActivitiesRefreshKeyboard(),
-                        cancellationToken: ct);
-                    break;
-
-                case ButlerSkill.DailySummary:
-                    var dailySummary = await _summaryExecutor.ExecuteAsync(weekly: false, "on-demand-daily", ct);
-                    await bot.SendTextMessageAsync(chatId, TruncateForTelegram(dailySummary ?? "No summary available."),
-                        replyMarkup: KeyboardFactory.BuildSummaryRefreshKeyboard(false),
-                        cancellationToken: ct);
-                    break;
-
-                case ButlerSkill.WeeklySummary:
-                    var weeklySummary = await _summaryExecutor.ExecuteAsync(weekly: true, "on-demand-weekly", ct);
-                    await bot.SendTextMessageAsync(chatId, TruncateForTelegram(weeklySummary ?? "No summary available."),
-                        replyMarkup: KeyboardFactory.BuildSummaryRefreshKeyboard(true),
-                        cancellationToken: ct);
-                    break;
-
-                case ButlerSkill.DrawingReference:
-                default:
-                    // Save image analysis to context
-                    var title = string.IsNullOrWhiteSpace(caption) ? "Image" : caption;
-                    await _contextService.AddPersonalAsync(
-                        body: description,
-                        title: title,
-                        mediaMetadata: string.IsNullOrWhiteSpace(caption) ? null : caption,
-                        mediaType: "image",
-                        ct: ct);
-
-                    var responseText = string.IsNullOrWhiteSpace(caption)
-                        ? $"Image analyzed and saved:\n\n{description}"
-                        : $"Image analyzed and saved:\n\nCaption: {caption}\n\nAnalysis: {description}";
-
-                    await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(responseText), ct);
-                    break;
-            }
+            await PromptIncomingActionAsync(bot, chatId, caption, largestPhoto.FileId, ct);
         }
         catch (Exception ex)
         {
@@ -153,39 +64,45 @@ public sealed class PhotoMessageHandler : IPhotoMessageHandler
         }
     }
 
-    private async Task HandleCalendarEventAsync(ITelegramBotClient bot, long chatId, string eventText, CancellationToken ct)
+    private async Task PromptIncomingActionAsync(
+        ITelegramBotClient bot,
+        long chatId,
+        string? caption,
+        string photoFileId,
+        CancellationToken ct)
     {
-        if (!_calendarExecutor.IsConfigured)
+        _stateManager.SetPendingIncomingChoice(chatId, new PendingIncomingChoice
         {
-            await SendWithKeyboardAsync(bot, chatId,
-                "Google Calendar is not configured.",
-                ct);
-            return;
+            Kind = PendingIncomingKind.Photo,
+            TelegramFileId = photoFileId,
+            CaptionOrText = caption,
+            MediaFileExtension = ".jpg",
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+        _stateManager.ClearPendingObsidianCapture(chatId);
+        _stateManager.ClearAwaitingObsidianDate(chatId);
+
+        await bot.SendTextMessageAsync(chatId,
+            "Should I try to find a Butler skill for this image, or add it to Obsidian?",
+            replyMarkup: KeyboardFactory.BuildIncomingActionKeyboard(),
+            cancellationToken: ct);
+    }
+
+    private static string? CleanObsidianText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
         }
 
-        var result = await _calendarExecutor.ParseEventAsync(eventText, ct);
-        if (result is null)
+        var trimmed = text.Trim();
+        var cleaned = ObsidianPrefixRegex.Replace(trimmed, string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(cleaned) && string.Equals(cleaned, trimmed, StringComparison.Ordinal))
         {
-            await SendWithKeyboardAsync(bot, chatId,
-                "I couldn't understand that event.",
-                ct);
-            return;
+            return trimmed;
         }
 
-        // For photo messages, create the event directly without confirmation
-        var createResult = await _calendarExecutor.CreateEventAsync(result.Parsed, ct);
-        if (createResult.Success)
-        {
-            await SendWithKeyboardAsync(bot, chatId,
-                $"Event created: {result.Parsed.Title}\n{createResult.HtmlLink}",
-                ct);
-        }
-        else
-        {
-            await SendWithKeyboardAsync(bot, chatId,
-                $"Failed to create event: {createResult.Error}",
-                ct);
-        }
+        return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
     }
 
     private static Task SendWithKeyboardAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)

@@ -46,7 +46,6 @@ public sealed class ActivitiesSkillExecutor : IActivitiesSkillExecutor
         DateOnly? endDate,
         CancellationToken ct)
     {
-        var tz = await _tzService.GetTimeZoneInfoAsync(ct);
         var items = await _contextService.GetRelevantAsync(daysBack: 14, take: 250, ct: ct);
         var citations = new List<ObsidianCitation>();
 
@@ -80,7 +79,7 @@ public sealed class ActivitiesSkillExecutor : IActivitiesSkillExecutor
             {
                 items.Add(new ContextItem
                 {
-                    Source = ContextSource.Personal,
+                    Source = ContextSource.Other,
                     Title = "AI self-thought",
                     Body = snippet.Trim(),
                     IsTimeless = true,
@@ -90,7 +89,7 @@ public sealed class ActivitiesSkillExecutor : IActivitiesSkillExecutor
             }
         }
 
-        // Activities should be driven by Personal context and per-skill instructions only.
+        // Activities should be driven by Obsidian context and per-skill instructions.
         var instructionsBySource = new Dictionary<ContextSource, string>();
         var prompt = BuildSkillPrompt(userQuery, cfg?.Content, citations.Count > 0);
         var result = await _summarizer.SummarizeAsync(items, instructionsBySource, "activities", prompt, ct);
@@ -123,7 +122,7 @@ public sealed class ActivitiesSkillExecutor : IActivitiesSkillExecutor
         }
         else
         {
-            sb.AppendLine("Suggest a small list of activities based on energy/mood signals in Personal context.");
+            sb.AppendLine("Suggest a small list of activities based on energy, mood, and patterns visible in Obsidian notes.");
         }
 
         if (hasVaultContext)
@@ -134,7 +133,7 @@ public sealed class ActivitiesSkillExecutor : IActivitiesSkillExecutor
         }
 
         sb.AppendLine();
-        sb.AppendLine("Ignore calendar/events/emails unless they are part of Personal context.");
+        sb.AppendLine("Ignore calendar/events/emails unless they materially help personalize the suggestions.");
         sb.AppendLine("Prefer 3-7 bullet points with brief rationale.");
         sb.AppendLine("Do not quote the notes; use them only as signals.");
         if (!string.IsNullOrWhiteSpace(custom))

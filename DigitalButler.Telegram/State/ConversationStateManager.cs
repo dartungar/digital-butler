@@ -99,6 +99,137 @@ public class ConversationStateManager
         state.PendingCalendarEventAt = DateTimeOffset.UtcNow;
     }
 
+    public void SetPendingObsidianCapture(long chatId, PendingObsidianCapture capture)
+    {
+        var state = GetOrCreateState(chatId);
+        state.PendingObsidianCapture = capture;
+        state.PendingObsidianCaptureAt = DateTimeOffset.UtcNow;
+    }
+
+    public void SetPendingIncomingChoice(long chatId, PendingIncomingChoice choice)
+    {
+        var state = GetOrCreateState(chatId);
+        state.PendingIncomingChoice = choice;
+        state.PendingIncomingChoiceAt = DateTimeOffset.UtcNow;
+    }
+
+    public PendingIncomingChoice? PeekPendingIncomingChoice(long chatId)
+    {
+        if (!_states.TryGetValue(chatId, out var state))
+            return null;
+
+        var pending = state.PendingIncomingChoice;
+        if (pending is null)
+            return null;
+
+        if (state.PendingIncomingChoiceAt.HasValue &&
+            (DateTimeOffset.UtcNow - state.PendingIncomingChoiceAt.Value) > _defaultTtl)
+        {
+            state.PendingIncomingChoice = null;
+            state.PendingIncomingChoiceAt = null;
+            return null;
+        }
+
+        return pending;
+    }
+
+    public PendingIncomingChoice? GetAndRemovePendingIncomingChoice(long chatId)
+    {
+        var pending = PeekPendingIncomingChoice(chatId);
+        if (pending is null)
+            return null;
+
+        ClearPendingIncomingChoice(chatId);
+        return pending;
+    }
+
+    public void ClearPendingIncomingChoice(long chatId)
+    {
+        if (_states.TryGetValue(chatId, out var state))
+        {
+            state.PendingIncomingChoice = null;
+            state.PendingIncomingChoiceAt = null;
+        }
+    }
+
+    public PendingObsidianCapture? PeekPendingObsidianCapture(long chatId)
+    {
+        if (!_states.TryGetValue(chatId, out var state))
+            return null;
+
+        var pending = state.PendingObsidianCapture;
+        if (pending is null)
+            return null;
+
+        if (state.PendingObsidianCaptureAt.HasValue &&
+            (DateTimeOffset.UtcNow - state.PendingObsidianCaptureAt.Value) > _defaultTtl)
+        {
+            state.PendingObsidianCapture = null;
+            state.PendingObsidianCaptureAt = null;
+            state.AwaitingObsidianDate = false;
+            state.AwaitingObsidianDateAt = null;
+            return null;
+        }
+
+        return pending;
+    }
+
+    public PendingObsidianCapture? GetAndRemovePendingObsidianCapture(long chatId)
+    {
+        var pending = PeekPendingObsidianCapture(chatId);
+        if (pending is null)
+            return null;
+
+        ClearPendingObsidianCapture(chatId);
+        return pending;
+    }
+
+    public void ClearPendingObsidianCapture(long chatId)
+    {
+        if (_states.TryGetValue(chatId, out var state))
+        {
+            state.PendingObsidianCapture = null;
+            state.PendingObsidianCaptureAt = null;
+            state.AwaitingObsidianDate = false;
+            state.AwaitingObsidianDateAt = null;
+        }
+    }
+
+    public void SetAwaitingObsidianDate(long chatId, bool awaiting)
+    {
+        var state = GetOrCreateState(chatId);
+        state.AwaitingObsidianDate = awaiting;
+        state.AwaitingObsidianDateAt = awaiting ? DateTimeOffset.UtcNow : null;
+    }
+
+    public bool IsAwaitingObsidianDate(long chatId)
+    {
+        if (!_states.TryGetValue(chatId, out var state))
+            return false;
+
+        if (!state.AwaitingObsidianDate)
+            return false;
+
+        if (state.AwaitingObsidianDateAt.HasValue &&
+            (DateTimeOffset.UtcNow - state.AwaitingObsidianDateAt.Value) > _defaultTtl)
+        {
+            state.AwaitingObsidianDate = false;
+            state.AwaitingObsidianDateAt = null;
+            return false;
+        }
+
+        return true;
+    }
+
+    public void ClearAwaitingObsidianDate(long chatId)
+    {
+        if (_states.TryGetValue(chatId, out var state))
+        {
+            state.AwaitingObsidianDate = false;
+            state.AwaitingObsidianDateAt = null;
+        }
+    }
+
     public ParsedCalendarEvent? GetAndRemovePendingCalendarEvent(long chatId)
     {
         if (!_states.TryGetValue(chatId, out var state))
@@ -179,7 +310,16 @@ public class ConversationStateManager
         var calendarEventExpired = state.PendingCalendarEvent is null ||
             (state.PendingCalendarEventAt.HasValue && (now - state.PendingCalendarEventAt.Value) > _defaultTtl);
 
-        return drawingSubjectExpired && drawingTopicExpired && calendarEventExpired;
+        var incomingChoiceExpired = state.PendingIncomingChoice is null ||
+            (state.PendingIncomingChoiceAt.HasValue && (now - state.PendingIncomingChoiceAt.Value) > _defaultTtl);
+
+        var obsidianCaptureExpired = state.PendingObsidianCapture is null ||
+            (state.PendingObsidianCaptureAt.HasValue && (now - state.PendingObsidianCaptureAt.Value) > _defaultTtl);
+
+        var awaitingObsidianDateExpired = !state.AwaitingObsidianDate ||
+            (state.AwaitingObsidianDateAt.HasValue && (now - state.AwaitingObsidianDateAt.Value) > _defaultTtl);
+
+        return drawingSubjectExpired && drawingTopicExpired && calendarEventExpired && incomingChoiceExpired && obsidianCaptureExpired && awaitingObsidianDateExpired;
     }
 
     private ConversationState GetOrCreateState(long chatId)
@@ -195,6 +335,12 @@ public class ConversationStateManager
         public DateTimeOffset? PendingDrawingTopicAt { get; set; }
         public ParsedCalendarEvent? PendingCalendarEvent { get; set; }
         public DateTimeOffset? PendingCalendarEventAt { get; set; }
+        public PendingIncomingChoice? PendingIncomingChoice { get; set; }
+        public DateTimeOffset? PendingIncomingChoiceAt { get; set; }
+        public PendingObsidianCapture? PendingObsidianCapture { get; set; }
+        public DateTimeOffset? PendingObsidianCaptureAt { get; set; }
+        public bool AwaitingObsidianDate { get; set; }
+        public DateTimeOffset? AwaitingObsidianDateAt { get; set; }
         public string? LastDrawingSubject { get; set; }
         public string? LastDrawingSource { get; set; }
     }

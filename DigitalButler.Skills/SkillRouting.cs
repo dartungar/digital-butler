@@ -44,7 +44,7 @@ public sealed class OpenAiSkillRouter : ISkillRouter
     {
         if (string.IsNullOrWhiteSpace(text))
         {
-            return new SkillRoutingResult { Skill = ButlerSkill.DailySummary };
+            return new SkillRoutingResult { Skill = ButlerSkill.Unknown };
         }
 
         return await RouteInternalAsync(text, ct);
@@ -54,7 +54,7 @@ public sealed class OpenAiSkillRouter : ISkillRouter
     {
         if (string.IsNullOrWhiteSpace(text))
         {
-            return new SkillRoutingResult { Skill = ButlerSkill.DailySummary };
+            return new SkillRoutingResult { Skill = ButlerSkill.Unknown };
         }
 
         // Skill routing needs AI settings. Prefer task-specific configuration, but if this task
@@ -71,7 +71,7 @@ public sealed class OpenAiSkillRouter : ISkillRouter
         }
         if (string.IsNullOrWhiteSpace(settings.ApiKey) || string.IsNullOrWhiteSpace(settings.Model))
         {
-            return new SkillRoutingResult { Skill = ButlerSkill.DailySummary };
+            return new SkillRoutingResult { Skill = ButlerSkill.Unknown };
         }
 
         var endpoint = OpenAiEndpoint.ResolveEndpoint(settings.BaseUrl);
@@ -80,10 +80,12 @@ You are a strict router for a digital butler.
 
 Pick exactly one skill for the user's message:
 - summary (daily/weekly agenda)
-- motivation (motivational message based on personal context)
+- motivation (motivational message based on Obsidian notes/context)
 - activities (suggest what to do based on energy/mood)
 - drawing_reference (find a drawing reference image)
 - calendar_event (create a new calendar event)
+- add_to_obsidian (save the provided content into Obsidian)
+- unknown (message does not clearly match any skill)
 - vault_search (search user's notes/knowledge base)
 
 Also determine if the skill would benefit from searching the user's Obsidian vault for relevant notes.
@@ -95,7 +97,7 @@ Return a JSON object with exactly these fields:
   "vault_query": "<search query or null>"
 }
 
-Skill tokens: summary_daily, summary_weekly, motivation, activities, drawing_reference, calendar_event, vault_search
+Skill tokens: summary_daily, summary_weekly, motivation, activities, drawing_reference, calendar_event, add_to_obsidian, unknown, vault_search
 
 Rules for needs_vault:
 - TRUE if the message references specific projects, topics, or past events that might be in notes
@@ -104,6 +106,10 @@ Rules for needs_vault:
 - FALSE for simple agenda/calendar queries
 - FALSE for drawing_reference (uses external image API)
 - FALSE for calendar_event creation (doesn't need context from notes)
+- FALSE for add_to_obsidian (this is a direct save action)
+- FALSE for unknown
+
+Return unknown when the message is just a standalone note, thought, reminder, shopping list, journal fragment, or anything else that does not clearly ask for one of the supported skills.
 
 For vault_query: Extract the core search topic. If dates are mentioned, keep them in the query.
 
@@ -134,6 +140,18 @@ User: I want a drawing reference for hands
 
 User: schedule a meeting with John tomorrow at 3pm
 {"skill":"calendar_event","needs_vault":false,"vault_query":null}
+
+User: save this to obsidian: buy oat milk and bananas
+{"skill":"add_to_obsidian","needs_vault":false,"vault_query":null}
+
+User: add this photo to my inbox note in obsidian
+{"skill":"add_to_obsidian","needs_vault":false,"vault_query":null}
+
+User: buy oat milk and bananas
+{"skill":"unknown","needs_vault":false,"vault_query":null}
+
+User: remember to call the dentist on Monday
+{"skill":"unknown","needs_vault":false,"vault_query":null}
 
 User: what meetings did I have last week?
 {"skill":"vault_search","needs_vault":true,"vault_query":"meetings last week"}
@@ -171,13 +189,13 @@ User: find my notes on cooking recipes
             var rawPreview = raw.Length <= 4000 ? raw : raw[..4000] + "…";
             _logger.LogWarning("Skill router raw response (truncated): {Raw}", rawPreview);
 
-            _logger.LogWarning("Skill router returned unexpected response '{Token}'. Defaulting to daily summary.", responseText);
-            return new SkillRoutingResult { Skill = ButlerSkill.DailySummary };
+            _logger.LogWarning("Skill router returned unexpected response '{Token}'. Treating as unknown.", responseText);
+            return new SkillRoutingResult { Skill = ButlerSkill.Unknown };
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Skill routing failed; defaulting to daily summary");
-            return new SkillRoutingResult { Skill = ButlerSkill.DailySummary };
+            _logger.LogWarning(ex, "Skill routing failed; treating as unknown");
+            return new SkillRoutingResult { Skill = ButlerSkill.Unknown };
         }
     }
 
@@ -231,7 +249,7 @@ User: find my notes on cooking recipes
 
     private static bool TryParseSkillToken(string token, out ButlerSkill skill)
     {
-        skill = ButlerSkill.DailySummary;
+        skill = ButlerSkill.Unknown;
 
         // Normalize token
         token = token.Trim().ToLowerInvariant();
@@ -243,6 +261,8 @@ User: find my notes on cooking recipes
         if (token.Contains("activities") || token is "act" or "activity") { skill = ButlerSkill.Activities; return true; }
         if (token.Contains("drawing_reference") || token is "draw" or "drawing" or "reference") { skill = ButlerSkill.DrawingReference; return true; }
         if (token.Contains("calendar_event") || token is "calendar" or "event" or "schedule") { skill = ButlerSkill.CalendarEvent; return true; }
+        if (token.Contains("add_to_obsidian") || token.Contains("obsidian_add") || token is "obsidian" or "save_to_obsidian" or "save_note") { skill = ButlerSkill.AddToObsidian; return true; }
+        if (token.Contains("unknown") || token is "none" or "other" or "unmatched" or "fallback") { skill = ButlerSkill.Unknown; return true; }
         if (token.Contains("vault_search") || token is "vault" or "search" or "notes") { skill = ButlerSkill.VaultSearch; return true; }
 
         return false;
@@ -270,12 +290,16 @@ User: find my notes on cooking recipes
         else if (token.Contains("activities")) token = "activities";
         else if (token.Contains("drawing_reference")) token = "drawing_reference";
         else if (token.Contains("calendar_event")) token = "calendar_event";
+        else if (token.Contains("add_to_obsidian")) token = "add_to_obsidian";
+        else if (token.Contains("unknown")) token = "unknown";
 
         // Be tolerant of minor deviations (we still instruct the model not to abbreviate).
         if (token is "mot" or "motiv" or "motivational") token = "motivation";
         if (token is "act" or "activity") token = "activities";
         if (token is "draw" or "drawing" or "reference" or "drawingreference" or "drawing_ref") token = "drawing_reference";
         if (token is "calendar" or "event" or "schedule" or "add_event" or "newevent" or "addevent") token = "calendar_event";
+        if (token is "obsidian" or "save_to_obsidian" or "save_note" or "addnote") token = "add_to_obsidian";
+        if (token is "unknown" or "none" or "other" or "fallback" or "unmatched") token = "unknown";
         if (token is "summary") token = "summary_daily";
 
         switch (token)
@@ -291,6 +315,12 @@ User: find my notes on cooking recipes
                 return true;
             case "calendar_event":
                 route = new SkillRoute(ButlerSkill.CalendarEvent);
+                return true;
+            case "add_to_obsidian":
+                route = new SkillRoute(ButlerSkill.AddToObsidian);
+                return true;
+            case "unknown":
+                route = new SkillRoute(ButlerSkill.Unknown);
                 return true;
             case "summary_weekly":
                 route = new SkillRoute(ButlerSkill.WeeklySummary);

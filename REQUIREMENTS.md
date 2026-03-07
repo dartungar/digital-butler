@@ -1,5 +1,5 @@
 This is a digital butler that uses various contexts 
-(calendar events, e-mails, and personal context, all stored in SQLite Database) 
+(calendar events, e-mails, and Obsidian-backed context, all stored in SQLite Database) 
 to provide information and advice.
 - as daily/weekly agenda
 - on-demand
@@ -12,7 +12,7 @@ AI model and API keys are set via environment variables.
 ##### Skills
 The butler has a set of skills that he uses to help the user:
 - summary: provide weekly or daily summary (agenda) (has configurable schedule)
-- motivation: say something motivational based on personal context
+- motivation: say something motivational based on Obsidian context
 - activities: what to do based on my level of energy, mood, etc
 - more to come
 
@@ -24,14 +24,14 @@ The user is able to set custom instructions for each skill on web UI.
 App has access to several sources of context:
 - Google Calendar events
 - E-mails from Gmail
-- Personal context added by user
+- Obsidian notes and captured inbox items
 - potentially more sources, like weather, air pollution, news, etc.
 
 Each external context source (called "Context", see DigitalButler.Context project) has its own updater that runs on a schedule 
 (configurable via Admin UI) to pull new data and update the database.
 
 Information from sources is pulled via APIs, processed (categorized/summarized) via AI, and stored in the database.
-Personal context can be added by user via Telegram or Admin UI and stored in the database.
+Telegram messages can be captured into Obsidian and then reflected back through Butler's Obsidian-based context.
 All context can be:
 - date-relevant
 - "timeless" (not date-relevant)
@@ -48,7 +48,7 @@ Admin UI should be implemented as a web app using Blazor or Razor Pages.
 App has a Telegram bot that:
 - sends daily summary at scheduled time
 - responds to user messages with on-demand summary
-- allows adding personal context via messages
+- can offer to capture unmatched messages into Obsidian
 
 Telegram Bot should be run as a background service.
 
