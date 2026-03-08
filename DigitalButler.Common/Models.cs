@@ -243,6 +243,7 @@ public sealed class ObsidianCaptureResult
     public string TargetDescription { get; set; } = string.Empty;
     public string NotePath { get; set; } = string.Empty;
     public string? MediaFileName { get; set; }
+    public string? MediaPath { get; set; }
 }
 
 public class GoogleCalendarFeed

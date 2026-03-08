@@ -188,13 +188,13 @@ public sealed class ObsidianCaptureService : IObsidianCaptureService
         EnsureMarkdownNotePath(notePath);
         Directory.CreateDirectory(Path.GetDirectoryName(notePath) ?? _options.VaultPath);
 
-        string? mediaFileName = null;
+        string? mediaPath = null;
         if (request.MediaBytes is { Length: > 0 })
         {
-            mediaFileName = await SaveMediaAsync(settings.MediaFolderPath, request, localNow, ct);
+            mediaPath = await SaveMediaAsync(settings.MediaFolderPath, request, localNow, ct);
         }
 
-        var entry = BuildEntry(textTemplate, mediaTemplate, request.TextContent, mediaFileName);
+        var entry = BuildEntry(textTemplate, mediaTemplate, request.TextContent, mediaPath);
         if (string.IsNullOrWhiteSpace(entry))
         {
             throw new InvalidOperationException("Obsidian capture template produced an empty entry.");
@@ -215,7 +215,8 @@ public sealed class ObsidianCaptureService : IObsidianCaptureService
         {
             TargetDescription = targetDescription,
             NotePath = GetVaultRelativePath(notePath),
-            MediaFileName = mediaFileName
+            MediaFileName = mediaPath is null ? null : Path.GetFileName(mediaPath),
+            MediaPath = mediaPath
         };
     }
 
@@ -237,7 +238,8 @@ public sealed class ObsidianCaptureService : IObsidianCaptureService
             {
                 await using var stream = new FileStream(mediaPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
                 await stream.WriteAsync(request.MediaBytes!, ct);
-                return fileName;
+                await stream.FlushAsync(ct);
+                return GetVaultRelativePath(mediaPath);
             }
             catch (IOException) when (File.Exists(mediaPath))
             {
@@ -324,10 +326,10 @@ public sealed class ObsidianCaptureService : IObsidianCaptureService
         return TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone);
     }
 
-    private static string BuildEntry(string textTemplate, string mediaTemplate, string? textContent, string? mediaFileName)
+    private static string BuildEntry(string textTemplate, string mediaTemplate, string? textContent, string? mediaPath)
     {
         var text = textContent?.Trim() ?? string.Empty;
-        var media = string.IsNullOrWhiteSpace(mediaFileName) ? string.Empty : $"![[{mediaFileName}]]";
+        var media = string.IsNullOrWhiteSpace(mediaPath) ? string.Empty : $"![[{mediaPath}]]";
 
         var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(text))

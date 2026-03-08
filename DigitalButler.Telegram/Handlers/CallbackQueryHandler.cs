@@ -1099,9 +1099,9 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
     private static string BuildObsidianSavedMessage(ObsidianCaptureResult result)
     {
         var message = $"Saved to {result.TargetDescription}: {result.NotePath}";
-        if (!string.IsNullOrWhiteSpace(result.MediaFileName))
+        if (!string.IsNullOrWhiteSpace(result.MediaPath))
         {
-            message += $"\nMedia: {result.MediaFileName}";
+            message += $"\nMedia: {result.MediaPath}";
         }
 
         return message;
