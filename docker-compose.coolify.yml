@@ -33,7 +33,7 @@ services:
       - GMAIL_MAX_MESSAGES_DEFAULT=${GMAIL_MAX_MESSAGES_DEFAULT}
       - UNSPLASH_ACCESS_KEY=${UNSPLASH_ACCESS_KEY}
       # Obsidian daily notes (synced via rsync to /var/notes on host)
-      - OBSIDIAN_VAULT_PATH=/var/notes
+      - OBSIDIAN_VAULT_PATH=/notes
       - OBSIDIAN_DAILY_NOTES_PATTERN=${OBSIDIAN_DAILY_NOTES_PATTERN:-04 archive/journal/daily journal/*.md}
       - OBSIDIAN_LOOKBACK_DAYS=${OBSIDIAN_LOOKBACK_DAYS:-30}
       - Database__SqlitePath=/data/butler.db
@@ -41,7 +41,7 @@ services:
       - "7766:8080"
     volumes:
       - butler-data:/data
-      - /var/headless_vault:/var/notes
+      - /var/obsidian:/notes
     restart: unless-stopped
 
 volumes:
