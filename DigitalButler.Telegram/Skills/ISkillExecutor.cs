@@ -55,15 +55,6 @@ public interface IActivitiesSkillExecutor
         CancellationToken ct);
 }
 
-public interface IDrawingReferenceSkillExecutor
-{
-    Task<DrawingReferenceExecutorResult> ExecuteAsync(string subject, CancellationToken ct);
-    Task<DrawingReferenceExecutorResult> ExecuteFromSourceAsync(string subject, string source, CancellationToken ct);
-    string GetRandomTopic();
-}
-
-public record DrawingReferenceExecutorResult(string Message, string Source);
-
 public interface ICalendarEventSkillExecutor
 {
     bool IsConfigured { get; }

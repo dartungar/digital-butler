@@ -57,9 +57,6 @@ MapEnv(envOverrides, "AI_BASE_URL", "AiDefaults:BaseUrl");
 MapEnv(envOverrides, "AI_MODEL", "AiDefaults:Model");
 MapEnv(envOverrides, "AI_API_KEY", "AiDefaults:ApiKey");
 
-MapEnv(envOverrides, "UNSPLASH_ACCESS_KEY", "Unsplash:AccessKey");
-MapEnv(envOverrides, "PEXELS_API_KEY", "Pexels:ApiKey");
-
 MapEnv(envOverrides, "BUTLER_ADMIN_USERNAME", "Auth:Username");
 MapEnv(envOverrides, "BUTLER_ADMIN_PASSWORD", "Auth:Password");
 MapEnv(envOverrides, "BUTLER_ADMIN_PASSWORD_HASH", "Auth:PasswordHash");
@@ -183,8 +180,6 @@ builder.Services.Configure<ButlerOptions>(builder.Configuration.GetSection("Butl
 
 builder.Services.Configure<GoogleCalendarOptions>(builder.Configuration.GetSection("GoogleCalendar"));
 builder.Services.Configure<GmailOptions>(builder.Configuration.GetSection("Gmail"));
-builder.Services.Configure<UnsplashOptions>(builder.Configuration.GetSection("Unsplash"));
-builder.Services.Configure<PexelsOptions>(builder.Configuration.GetSection("Pexels"));
 builder.Services.Configure<GoogleCalendarOAuthOptions>(builder.Configuration.GetSection("GoogleCalendarOAuth"));
 builder.Services.Configure<ObsidianOptions>(builder.Configuration.GetSection("Obsidian"));
 
@@ -215,11 +210,6 @@ builder.Services.Configure<VaultIndexerOptions>(opts =>
 builder.Services.AddHttpClient<ISummarizationService, OpenAiSummarizationService>();
 builder.Services.AddHttpClient<ISkillRouter, OpenAiSkillRouter>();
 builder.Services.AddHttpClient<IAiContextAugmenter, OpenAiContextAugmenter>();
-builder.Services.AddHttpClient<ISubjectTranslator, OpenAiSubjectTranslator>();
-builder.Services.AddHttpClient<UnsplashDrawingReferenceService>();
-builder.Services.AddHttpClient<PexelsDrawingReferenceService>();
-builder.Services.AddScoped<ICompositeDrawingReferenceService, CompositeDrawingReferenceService>();
-builder.Services.AddSingleton<IRandomDrawingTopicService, RandomDrawingTopicService>();
 builder.Services.AddSingleton<IGoogleCalendarEventService, GoogleCalendarEventService>();
 builder.Services.AddHttpClient<ICalendarEventParser, OpenAiCalendarEventParser>();
 builder.Services.AddScoped<IMediaDownloadService, TelegramMediaDownloadService>();

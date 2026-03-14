@@ -301,7 +301,6 @@ public enum SkillType
     Summary,
     Motivation,
     Activities,
-    DrawingReference,
     CalendarEvent,
 
     // new

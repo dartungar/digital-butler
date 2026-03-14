@@ -33,7 +33,6 @@ public static class KeyboardFactory
             },
             new[]
             {
-                InlineKeyboardButton.WithCallbackData("Drawing Ref", "help:drawref"),
                 InlineKeyboardButton.WithCallbackData("Add Event", "help:addevent")
             }
         });
@@ -85,41 +84,6 @@ public static class KeyboardFactory
         });
     }
 
-    public static InlineKeyboardMarkup BuildDrawingTopicConfirmationKeyboard()
-    {
-        return new InlineKeyboardMarkup(new[]
-        {
-            new[]
-            {
-                InlineKeyboardButton.WithCallbackData("Yes, let's go!", "drawref:confirm"),
-                InlineKeyboardButton.WithCallbackData("Suggest another", "drawref:another")
-            }
-        });
-    }
-
-    public static InlineKeyboardMarkup BuildDrawingResultKeyboard(string? currentSource = null)
-    {
-        var tryOtherLabel = currentSource switch
-        {
-            "unsplash" => "Try Pexels",
-            "pexels" => "Try Unsplash",
-            _ => "Try Other Site"
-        };
-
-        return new InlineKeyboardMarkup(new[]
-        {
-            new[]
-            {
-                InlineKeyboardButton.WithCallbackData("Different Image", "drawref:different_image"),
-                InlineKeyboardButton.WithCallbackData(tryOtherLabel, "drawref:try_other_source")
-            },
-            new[]
-            {
-                InlineKeyboardButton.WithCallbackData("Different Subject", "drawref:different_subject")
-            }
-        });
-    }
-
     public static InlineKeyboardMarkup BuildEventConfirmationKeyboard()
     {
         return new InlineKeyboardMarkup(new[]
@@ -132,54 +96,4 @@ public static class KeyboardFactory
         });
     }
 
-    public static InlineKeyboardMarkup BuildObsidianDestinationKeyboard()
-    {
-        return new InlineKeyboardMarkup(new[]
-        {
-            new[]
-            {
-                InlineKeyboardButton.WithCallbackData("Today's daily note", "obsidian:today")
-            },
-            new[]
-            {
-                InlineKeyboardButton.WithCallbackData("Other date's daily note", "obsidian:other_date")
-            },
-            new[]
-            {
-                InlineKeyboardButton.WithCallbackData("Inbox note", "obsidian:inbox")
-            },
-            new[]
-            {
-                InlineKeyboardButton.WithCallbackData("Cancel", "obsidian:cancel")
-            }
-        });
-    }
-
-    public static InlineKeyboardMarkup BuildObsidianConfirmKeyboard()
-    {
-        return new InlineKeyboardMarkup(new[]
-        {
-            new[]
-            {
-                InlineKeyboardButton.WithCallbackData("Add to Obsidian", "obsidian:confirm_add"),
-                InlineKeyboardButton.WithCallbackData("Cancel", "obsidian:cancel")
-            }
-        });
-    }
-
-    public static InlineKeyboardMarkup BuildIncomingActionKeyboard()
-    {
-        return new InlineKeyboardMarkup(new[]
-        {
-            new[]
-            {
-                InlineKeyboardButton.WithCallbackData("Find skill", "intake:skill"),
-                InlineKeyboardButton.WithCallbackData("Add to Obsidian", "intake:obsidian")
-            },
-            new[]
-            {
-                InlineKeyboardButton.WithCallbackData("Cancel", "intake:cancel")
-            }
-        });
-    }
 }

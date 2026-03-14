@@ -59,7 +59,6 @@ public enum ButlerSkill
     DailySummary = 0,    // Was Summary
     Motivation = 1,
     Activities = 2,
-    DrawingReference = 3,
     CalendarEvent = 4,
     WeeklySummary = 5,
     VaultSearch = 6,     // Search Obsidian vault

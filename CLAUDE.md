@@ -44,7 +44,6 @@ DigitalButler.Web (entry point)
 - **ICalendarEventParser** - Natural language to calendar events
 - **IAudioTranscriptionService** - Whisper API for voice messages
 - **IImageAnalysisService** - Vision API for image analysis
-- **ISubjectTranslator** - Translates subjects to English for image search
 
 ### Vault Search (`DigitalButler.Skills/VaultSearch`)
 Semantic search over the Obsidian vault using embeddings:
@@ -57,18 +56,17 @@ Semantic search over the Obsidian vault using embeddings:
 
 ### Telegram Bot (`DigitalButler.Telegram`)
 - **BotService** - IHostedService with polling (not webhooks)
-- **TextMessageHandler** - Commands: `/daily`, `/weekly`, `/summary`, `/motivation`, `/activities`, `/drawref`, `/addevent`, `/add`, `/sync`, `/search`, `/vaultstats`, `/help`
+- **TextMessageHandler** - Commands: `/daily`, `/weekly`, `/summary`, `/motivation`, `/activities`, `/addevent`, `/add`, `/sync`, `/search`, `/vaultstats`, `/help`
 - **VoiceMessageHandler** - Transcribes voice messages
 - **PhotoMessageHandler** - Analyzes images
 - **CallbackQueryHandler** - Handles inline keyboard button callbacks
-- **ConversationStateManager** - Tracks multi-turn conversation state (pending events, drawing topics)
+- **ConversationStateManager** - Tracks multi-turn conversation state (pending events, Obsidian capture)
 - **KeyboardFactory** - Builds inline keyboards for interactive UI
 
 ### Skill Executors (`DigitalButler.Telegram/Skills`)
 - **SummarySkillExecutor** - Daily/weekly summaries with optional vault enrichment
 - **MotivationSkillExecutor** - Personalized motivational messages
 - **ActivitiesSkillExecutor** - Activity suggestions based on energy/mood
-- **DrawingReferenceSkillExecutor** - Fetches drawing references from Unsplash/Pexels
 - **CalendarEventSkillExecutor** - Creates Google Calendar events
 - **VaultSearchSkillExecutor** - Semantic search of Obsidian vault
 - **VaultEnrichmentService** - Enriches other skills with relevant vault context
@@ -87,7 +85,6 @@ Semantic search over the Obsidian vault using embeddings:
 | Bit-mask | ContextSourceMask for per-skill context filtering |
 | Hosted Service | SchedulerService, BotService for background work |
 | Conversation State | ConversationStateManager for multi-turn interactions |
-| Composite | CompositeDrawingReferenceService (Unsplash + Pexels) |
 
 ## Database
 
@@ -119,7 +116,7 @@ Semantic search over the Obsidian vault using embeddings:
 - Uses **OpenAI Responses API** (not chat/completions) for structured outputs
 - Configurable via env vars: `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY`
 - Per-task overrides via `AiTaskSettings` table
-- **Skills**: DailySummary, WeeklySummary, Motivation, Activities, DrawingReference, CalendarEvent, VaultSearch
+- **Skills**: DailySummary, WeeklySummary, Motivation, Activities, CalendarEvent, VaultSearch, AddToObsidian
 - **Embeddings**: text-embedding-3-small (1536 dimensions) for vault search
 
 ## Configuration
@@ -167,12 +164,6 @@ EMBEDDING_MODEL                            # Embedding model (default: text-embe
 OBSIDIAN_SEARCH_EXCLUDE_PATTERNS           # Comma-separated glob patterns to exclude
 OBSIDIAN_SEARCH_CHUNK_SIZE                 # Target tokens per chunk
 OBSIDIAN_SEARCH_BATCH_SIZE                 # Embeddings batch size
-```
-
-### Image Sources
-```
-UNSPLASH_ACCESS_KEY                        # Unsplash API key
-PEXELS_API_KEY                             # Pexels API key
 ```
 
 ## Deployment

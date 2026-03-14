@@ -8,226 +8,11 @@ public class ConversationStateManager
     private readonly ConcurrentDictionary<long, ConversationState> _states = new();
     private readonly TimeSpan _defaultTtl = TimeSpan.FromMinutes(5);
 
-    public void SetAwaitingDrawingSubject(long chatId, bool awaiting)
-    {
-        var state = GetOrCreateState(chatId);
-        state.AwaitingDrawingSubject = awaiting;
-        if (awaiting)
-            state.AwaitingDrawingSubjectAt = DateTimeOffset.UtcNow;
-    }
-
-    public bool IsAwaitingDrawingSubject(long chatId)
-    {
-        if (!_states.TryGetValue(chatId, out var state))
-            return false;
-
-        if (!state.AwaitingDrawingSubject)
-            return false;
-
-        // Check TTL
-        if (state.AwaitingDrawingSubjectAt.HasValue &&
-            (DateTimeOffset.UtcNow - state.AwaitingDrawingSubjectAt.Value) > _defaultTtl)
-        {
-            state.AwaitingDrawingSubject = false;
-            return false;
-        }
-
-        return true;
-    }
-
-    public void ClearAwaitingDrawingSubject(long chatId)
-    {
-        if (_states.TryGetValue(chatId, out var state))
-        {
-            state.AwaitingDrawingSubject = false;
-            state.AwaitingDrawingSubjectAt = null;
-        }
-    }
-
-    public void SetPendingDrawingTopic(long chatId, string topic)
-    {
-        var state = GetOrCreateState(chatId);
-        state.PendingDrawingTopic = topic;
-        state.PendingDrawingTopicAt = DateTimeOffset.UtcNow;
-    }
-
-    public string? GetAndRemovePendingDrawingTopic(long chatId)
-    {
-        if (!_states.TryGetValue(chatId, out var state))
-            return null;
-
-        var topic = state.PendingDrawingTopic;
-        if (topic is null)
-            return null;
-
-        // Check TTL
-        if (state.PendingDrawingTopicAt.HasValue &&
-            (DateTimeOffset.UtcNow - state.PendingDrawingTopicAt.Value) > _defaultTtl)
-        {
-            state.PendingDrawingTopic = null;
-            return null;
-        }
-
-        state.PendingDrawingTopic = null;
-        state.PendingDrawingTopicAt = null;
-        return topic;
-    }
-
-    public string? PeekPendingDrawingTopic(long chatId)
-    {
-        if (!_states.TryGetValue(chatId, out var state))
-            return null;
-
-        if (state.PendingDrawingTopic is null)
-            return null;
-
-        // Check TTL
-        if (state.PendingDrawingTopicAt.HasValue &&
-            (DateTimeOffset.UtcNow - state.PendingDrawingTopicAt.Value) > _defaultTtl)
-        {
-            state.PendingDrawingTopic = null;
-            return null;
-        }
-
-        return state.PendingDrawingTopic;
-    }
-
     public void SetPendingCalendarEvent(long chatId, ParsedCalendarEvent parsed)
     {
         var state = GetOrCreateState(chatId);
         state.PendingCalendarEvent = parsed;
         state.PendingCalendarEventAt = DateTimeOffset.UtcNow;
-    }
-
-    public void SetPendingObsidianCapture(long chatId, PendingObsidianCapture capture)
-    {
-        var state = GetOrCreateState(chatId);
-        state.PendingObsidianCapture = capture;
-        state.PendingObsidianCaptureAt = DateTimeOffset.UtcNow;
-    }
-
-    public void SetPendingIncomingChoice(long chatId, PendingIncomingChoice choice)
-    {
-        var state = GetOrCreateState(chatId);
-        state.PendingIncomingChoice = choice;
-        state.PendingIncomingChoiceAt = DateTimeOffset.UtcNow;
-    }
-
-    public PendingIncomingChoice? PeekPendingIncomingChoice(long chatId)
-    {
-        if (!_states.TryGetValue(chatId, out var state))
-            return null;
-
-        var pending = state.PendingIncomingChoice;
-        if (pending is null)
-            return null;
-
-        if (state.PendingIncomingChoiceAt.HasValue &&
-            (DateTimeOffset.UtcNow - state.PendingIncomingChoiceAt.Value) > _defaultTtl)
-        {
-            state.PendingIncomingChoice = null;
-            state.PendingIncomingChoiceAt = null;
-            return null;
-        }
-
-        return pending;
-    }
-
-    public PendingIncomingChoice? GetAndRemovePendingIncomingChoice(long chatId)
-    {
-        var pending = PeekPendingIncomingChoice(chatId);
-        if (pending is null)
-            return null;
-
-        ClearPendingIncomingChoice(chatId);
-        return pending;
-    }
-
-    public void ClearPendingIncomingChoice(long chatId)
-    {
-        if (_states.TryGetValue(chatId, out var state))
-        {
-            state.PendingIncomingChoice = null;
-            state.PendingIncomingChoiceAt = null;
-        }
-    }
-
-    public PendingObsidianCapture? PeekPendingObsidianCapture(long chatId)
-    {
-        if (!_states.TryGetValue(chatId, out var state))
-            return null;
-
-        var pending = state.PendingObsidianCapture;
-        if (pending is null)
-            return null;
-
-        if (state.PendingObsidianCaptureAt.HasValue &&
-            (DateTimeOffset.UtcNow - state.PendingObsidianCaptureAt.Value) > _defaultTtl)
-        {
-            state.PendingObsidianCapture = null;
-            state.PendingObsidianCaptureAt = null;
-            state.AwaitingObsidianDate = false;
-            state.AwaitingObsidianDateAt = null;
-            return null;
-        }
-
-        return pending;
-    }
-
-    public PendingObsidianCapture? GetAndRemovePendingObsidianCapture(long chatId)
-    {
-        var pending = PeekPendingObsidianCapture(chatId);
-        if (pending is null)
-            return null;
-
-        ClearPendingObsidianCapture(chatId);
-        return pending;
-    }
-
-    public void ClearPendingObsidianCapture(long chatId)
-    {
-        if (_states.TryGetValue(chatId, out var state))
-        {
-            state.PendingObsidianCapture = null;
-            state.PendingObsidianCaptureAt = null;
-            state.AwaitingObsidianDate = false;
-            state.AwaitingObsidianDateAt = null;
-        }
-    }
-
-    public void SetAwaitingObsidianDate(long chatId, bool awaiting)
-    {
-        var state = GetOrCreateState(chatId);
-        state.AwaitingObsidianDate = awaiting;
-        state.AwaitingObsidianDateAt = awaiting ? DateTimeOffset.UtcNow : null;
-    }
-
-    public bool IsAwaitingObsidianDate(long chatId)
-    {
-        if (!_states.TryGetValue(chatId, out var state))
-            return false;
-
-        if (!state.AwaitingObsidianDate)
-            return false;
-
-        if (state.AwaitingObsidianDateAt.HasValue &&
-            (DateTimeOffset.UtcNow - state.AwaitingObsidianDateAt.Value) > _defaultTtl)
-        {
-            state.AwaitingObsidianDate = false;
-            state.AwaitingObsidianDateAt = null;
-            return false;
-        }
-
-        return true;
-    }
-
-    public void ClearAwaitingObsidianDate(long chatId)
-    {
-        if (_states.TryGetValue(chatId, out var state))
-        {
-            state.AwaitingObsidianDate = false;
-            state.AwaitingObsidianDateAt = null;
-        }
     }
 
     public ParsedCalendarEvent? GetAndRemovePendingCalendarEvent(long chatId)
@@ -239,11 +24,11 @@ public class ConversationStateManager
         if (parsed is null)
             return null;
 
-        // Check TTL
         if (state.PendingCalendarEventAt.HasValue &&
             (DateTimeOffset.UtcNow - state.PendingCalendarEventAt.Value) > _defaultTtl)
         {
             state.PendingCalendarEvent = null;
+            state.PendingCalendarEventAt = null;
             return null;
         }
 
@@ -261,28 +46,6 @@ public class ConversationStateManager
         }
     }
 
-    public void SetLastDrawingSubject(long chatId, string subject)
-    {
-        var state = GetOrCreateState(chatId);
-        state.LastDrawingSubject = subject;
-    }
-
-    public string? GetLastDrawingSubject(long chatId)
-    {
-        return _states.TryGetValue(chatId, out var state) ? state.LastDrawingSubject : null;
-    }
-
-    public void SetLastDrawingSource(long chatId, string source)
-    {
-        var state = GetOrCreateState(chatId);
-        state.LastDrawingSource = source;
-    }
-
-    public string? GetLastDrawingSource(long chatId)
-    {
-        return _states.TryGetValue(chatId, out var state) ? state.LastDrawingSource : null;
-    }
-
     public void CleanupExpired()
     {
         var expiredChats = _states
@@ -298,28 +61,9 @@ public class ConversationStateManager
 
     private bool IsStateExpired(ConversationState state)
     {
-        // State is expired if all pending items are either null or past TTL
         var now = DateTimeOffset.UtcNow;
-
-        var drawingSubjectExpired = !state.AwaitingDrawingSubject ||
-            (state.AwaitingDrawingSubjectAt.HasValue && (now - state.AwaitingDrawingSubjectAt.Value) > _defaultTtl);
-
-        var drawingTopicExpired = state.PendingDrawingTopic is null ||
-            (state.PendingDrawingTopicAt.HasValue && (now - state.PendingDrawingTopicAt.Value) > _defaultTtl);
-
-        var calendarEventExpired = state.PendingCalendarEvent is null ||
-            (state.PendingCalendarEventAt.HasValue && (now - state.PendingCalendarEventAt.Value) > _defaultTtl);
-
-        var incomingChoiceExpired = state.PendingIncomingChoice is null ||
-            (state.PendingIncomingChoiceAt.HasValue && (now - state.PendingIncomingChoiceAt.Value) > _defaultTtl);
-
-        var obsidianCaptureExpired = state.PendingObsidianCapture is null ||
-            (state.PendingObsidianCaptureAt.HasValue && (now - state.PendingObsidianCaptureAt.Value) > _defaultTtl);
-
-        var awaitingObsidianDateExpired = !state.AwaitingObsidianDate ||
-            (state.AwaitingObsidianDateAt.HasValue && (now - state.AwaitingObsidianDateAt.Value) > _defaultTtl);
-
-        return drawingSubjectExpired && drawingTopicExpired && calendarEventExpired && incomingChoiceExpired && obsidianCaptureExpired && awaitingObsidianDateExpired;
+        return state.PendingCalendarEvent is null ||
+               (state.PendingCalendarEventAt.HasValue && (now - state.PendingCalendarEventAt.Value) > _defaultTtl);
     }
 
     private ConversationState GetOrCreateState(long chatId)
@@ -329,19 +73,7 @@ public class ConversationStateManager
 
     private class ConversationState
     {
-        public bool AwaitingDrawingSubject { get; set; }
-        public DateTimeOffset? AwaitingDrawingSubjectAt { get; set; }
-        public string? PendingDrawingTopic { get; set; }
-        public DateTimeOffset? PendingDrawingTopicAt { get; set; }
         public ParsedCalendarEvent? PendingCalendarEvent { get; set; }
         public DateTimeOffset? PendingCalendarEventAt { get; set; }
-        public PendingIncomingChoice? PendingIncomingChoice { get; set; }
-        public DateTimeOffset? PendingIncomingChoiceAt { get; set; }
-        public PendingObsidianCapture? PendingObsidianCapture { get; set; }
-        public DateTimeOffset? PendingObsidianCaptureAt { get; set; }
-        public bool AwaitingObsidianDate { get; set; }
-        public DateTimeOffset? AwaitingObsidianDateAt { get; set; }
-        public string? LastDrawingSubject { get; set; }
-        public string? LastDrawingSource { get; set; }
     }
 }

@@ -20,7 +20,6 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISummarySkillExecutor, SummarySkillExecutor>();
         services.AddScoped<IMotivationSkillExecutor, MotivationSkillExecutor>();
         services.AddScoped<IActivitiesSkillExecutor, ActivitiesSkillExecutor>();
-        services.AddScoped<IDrawingReferenceSkillExecutor, DrawingReferenceSkillExecutor>();
         services.AddScoped<ICalendarEventSkillExecutor, CalendarEventSkillExecutor>();
         services.AddScoped<IVaultSearchSkillExecutor, VaultSearchSkillExecutor>();
 

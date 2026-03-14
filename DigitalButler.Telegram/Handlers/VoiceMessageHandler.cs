@@ -1,4 +1,7 @@
 using DigitalButler.Common;
+using DigitalButler.Skills;
+using DigitalButler.Skills.VaultSearch;
+using DigitalButler.Telegram.Skills;
 using DigitalButler.Telegram.State;
 using DigitalButler.Telegram.UI;
 using Microsoft.Extensions.Configuration;
@@ -12,14 +15,41 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
 {
     private readonly ILogger<VoiceMessageHandler> _logger;
     private readonly long _allowedUserId;
+    private readonly IMediaDownloadService _mediaDownloadService;
+    private readonly IAudioTranscriptionService _transcriptionService;
+    private readonly ISkillRouter _skillRouter;
+    private readonly IDateQueryTranslator _dateTranslator;
+    private readonly ISummarySkillExecutor _summaryExecutor;
+    private readonly IMotivationSkillExecutor _motivationExecutor;
+    private readonly IActivitiesSkillExecutor _activitiesExecutor;
+    private readonly ICalendarEventSkillExecutor _calendarExecutor;
+    private readonly IVaultSearchSkillExecutor _vaultSearchExecutor;
     private readonly ConversationStateManager _stateManager;
 
     public VoiceMessageHandler(
         ILogger<VoiceMessageHandler> logger,
         IConfiguration config,
+        IMediaDownloadService mediaDownloadService,
+        IAudioTranscriptionService transcriptionService,
+        ISkillRouter skillRouter,
+        IDateQueryTranslator dateTranslator,
+        ISummarySkillExecutor summaryExecutor,
+        IMotivationSkillExecutor motivationExecutor,
+        IActivitiesSkillExecutor activitiesExecutor,
+        ICalendarEventSkillExecutor calendarExecutor,
+        IVaultSearchSkillExecutor vaultSearchExecutor,
         ConversationStateManager stateManager)
     {
         _logger = logger;
+        _mediaDownloadService = mediaDownloadService;
+        _transcriptionService = transcriptionService;
+        _skillRouter = skillRouter;
+        _dateTranslator = dateTranslator;
+        _summaryExecutor = summaryExecutor;
+        _motivationExecutor = motivationExecutor;
+        _activitiesExecutor = activitiesExecutor;
+        _calendarExecutor = calendarExecutor;
+        _vaultSearchExecutor = vaultSearchExecutor;
         _stateManager = stateManager;
 
         var allowedUserIdStr = config["TELEGRAM_ALLOWED_USER_ID"];
@@ -36,7 +66,6 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
         var chatId = message.Chat.Id;
         var userId = message.From?.Id;
 
-        // Authorization check
         if (userId != _allowedUserId)
         {
             _logger.LogWarning("Unauthorized voice message from user {UserId}", userId);
@@ -46,7 +75,17 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
 
         try
         {
-            await PromptIncomingActionAsync(bot, chatId, message.Voice.FileId, ct);
+            await SendWithKeyboardAsync(bot, chatId, "Transcribing voice message...", ct);
+            var audioData = await _mediaDownloadService.DownloadFileAsync(bot, message.Voice.FileId, ct);
+            var transcript = await _transcriptionService.TranscribeAsync(audioData, $"voice_{message.Voice.FileId}.ogg", ct);
+
+            if (string.IsNullOrWhiteSpace(transcript.Text))
+            {
+                await SendWithKeyboardAsync(bot, chatId, "I couldn't transcribe this voice message.", ct);
+                return;
+            }
+
+            await HandleSkillRoutingAsync(bot, chatId, transcript.Text.Trim(), ct);
         }
         catch (Exception ex)
         {
@@ -55,21 +94,145 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
         }
     }
 
-    private async Task PromptIncomingActionAsync(ITelegramBotClient bot, long chatId, string voiceFileId, CancellationToken ct)
+    private async Task HandleSkillRoutingAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)
     {
-        _stateManager.SetPendingIncomingChoice(chatId, new PendingIncomingChoice
-        {
-            Kind = PendingIncomingKind.Voice,
-            TelegramFileId = voiceFileId,
-            CreatedAt = DateTimeOffset.UtcNow
-        });
-        _stateManager.ClearPendingObsidianCapture(chatId);
-        _stateManager.ClearAwaitingObsidianDate(chatId);
+        var routingResult = await _skillRouter.RouteWithEnrichmentAsync(text, ct);
 
-        await bot.SendTextMessageAsync(chatId,
-            "Should I try to find a Butler skill for this voice note, or add it to Obsidian?",
-            replyMarkup: KeyboardFactory.BuildIncomingActionKeyboard(),
+        DateOnly? startDate = null;
+        DateOnly? endDate = null;
+        string? vaultQuery = null;
+
+        if (routingResult.NeedsVaultEnrichment)
+        {
+            vaultQuery = routingResult.VaultSearchQuery ?? text;
+            var translated = _dateTranslator.TranslateQuery(vaultQuery, DateTimeOffset.UtcNow);
+            startDate = translated.StartDate;
+            endDate = translated.EndDate;
+
+            if (!startDate.HasValue && !endDate.HasValue)
+            {
+                translated = _dateTranslator.TranslateQuery(text, DateTimeOffset.UtcNow);
+                startDate = translated.StartDate;
+                endDate = translated.EndDate;
+            }
+        }
+
+        switch (routingResult.Skill)
+        {
+            case ButlerSkill.Motivation:
+                await HandleMotivationAsync(bot, chatId, text, vaultQuery, startDate, endDate, ct);
+                break;
+            case ButlerSkill.Activities:
+                await HandleActivitiesAsync(bot, chatId, text, vaultQuery, startDate, endDate, ct);
+                break;
+            case ButlerSkill.CalendarEvent:
+                var eventText = CalendarEventSkillExecutor.TryExtractEventText(text) ?? text;
+                await HandleAddEventAsync(bot, chatId, eventText, ct);
+                break;
+            case ButlerSkill.VaultSearch:
+                if (startDate.HasValue && endDate.HasValue)
+                {
+                    await HandleSummaryAsync(bot, chatId, false, vaultQuery, startDate, endDate, ct);
+                }
+                else
+                {
+                    await HandleVaultSearchAsync(bot, chatId, routingResult.VaultSearchQuery ?? text, ct);
+                }
+
+                break;
+            case ButlerSkill.DailySummary:
+                await HandleSummaryAsync(bot, chatId, false, vaultQuery, startDate, endDate, ct);
+                break;
+            case ButlerSkill.WeeklySummary:
+                await HandleSummaryAsync(bot, chatId, true, vaultQuery, startDate, endDate, ct);
+                break;
+            default:
+                await SendWithKeyboardAsync(bot, chatId, "I couldn't match that voice note to a Butler skill.", ct);
+                break;
+        }
+    }
+
+    private async Task HandleSummaryAsync(
+        ITelegramBotClient bot,
+        long chatId,
+        bool weekly,
+        string? vaultQuery,
+        DateOnly? startDate,
+        DateOnly? endDate,
+        CancellationToken ct)
+    {
+        await SendWithKeyboardAsync(bot, chatId, weekly ? "Generating weekly summary..." : "Generating summary...", ct);
+
+        var taskName = weekly ? "on-demand-weekly" : "on-demand-daily";
+        var summary = await _summaryExecutor.ExecuteAsync(weekly, taskName, vaultQuery, startDate, endDate, ct);
+        if (string.IsNullOrWhiteSpace(summary)) summary = "No summary available.";
+
+        await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(summary), ct);
+    }
+
+    private async Task HandleMotivationAsync(
+        ITelegramBotClient bot,
+        long chatId,
+        string userQuery,
+        string? vaultQuery,
+        DateOnly? startDate,
+        DateOnly? endDate,
+        CancellationToken ct)
+    {
+        await SendWithKeyboardAsync(bot, chatId, "Generating motivation...", ct);
+        var result = await _motivationExecutor.ExecuteAsync(userQuery, vaultQuery, startDate, endDate, ct);
+        if (string.IsNullOrWhiteSpace(result)) result = "No motivation available.";
+        await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(result), ct);
+    }
+
+    private async Task HandleActivitiesAsync(
+        ITelegramBotClient bot,
+        long chatId,
+        string userQuery,
+        string? vaultQuery,
+        DateOnly? startDate,
+        DateOnly? endDate,
+        CancellationToken ct)
+    {
+        await SendWithKeyboardAsync(bot, chatId, "Generating activities...", ct);
+        var result = await _activitiesExecutor.ExecuteAsync(userQuery, vaultQuery, startDate, endDate, ct);
+        if (string.IsNullOrWhiteSpace(result)) result = "No activities available.";
+        await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(result), ct);
+    }
+
+    private async Task HandleAddEventAsync(ITelegramBotClient bot, long chatId, string eventText, CancellationToken ct)
+    {
+        if (!_calendarExecutor.IsConfigured)
+        {
+            await SendWithKeyboardAsync(bot, chatId,
+                "Google Calendar is not configured. Set GOOGLE_SERVICE_ACCOUNT_KEY_PATH or GOOGLE_SERVICE_ACCOUNT_JSON, and GOOGLE_CALENDAR_ID.",
+                ct);
+            return;
+        }
+
+        await SendWithKeyboardAsync(bot, chatId, "Parsing your event...", ct);
+
+        var result = await _calendarExecutor.ParseEventAsync(eventText, ct);
+        if (result is null)
+        {
+            await SendWithKeyboardAsync(bot, chatId,
+                "I couldn't understand that event. Try something like:\n\"Meeting with John tomorrow at 3pm for 1 hour\"",
+                ct);
+            return;
+        }
+
+        _stateManager.SetPendingCalendarEvent(chatId, result.Parsed);
+
+        await bot.SendTextMessageAsync(chatId, result.Preview,
+            replyMarkup: KeyboardFactory.BuildEventConfirmationKeyboard(),
             cancellationToken: ct);
+    }
+
+    private async Task HandleVaultSearchAsync(ITelegramBotClient bot, long chatId, string query, CancellationToken ct)
+    {
+        await SendWithKeyboardAsync(bot, chatId, "Searching vault...", ct);
+        var result = await _vaultSearchExecutor.ExecuteAsync(query, ct);
+        await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(result), ct);
     }
 
     private static Task SendWithKeyboardAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)

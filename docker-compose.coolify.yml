@@ -31,7 +31,6 @@ services:
       - GMAIL_UNREAD_ONLY_DEFAULT=${GMAIL_UNREAD_ONLY_DEFAULT}
       - GMAIL_DAYS_BACK_DEFAULT=${GMAIL_DAYS_BACK_DEFAULT}
       - GMAIL_MAX_MESSAGES_DEFAULT=${GMAIL_MAX_MESSAGES_DEFAULT}
-      - UNSPLASH_ACCESS_KEY=${UNSPLASH_ACCESS_KEY}
       # Obsidian daily notes (synced via rsync to /var/notes on host)
       - OBSIDIAN_VAULT_PATH=/notes
       - OBSIDIAN_DAILY_NOTES_PATTERN=${OBSIDIAN_DAILY_NOTES_PATTERN:-04 archive/journal/daily journal/*.md}
