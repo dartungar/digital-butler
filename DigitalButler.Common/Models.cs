@@ -167,7 +167,10 @@ public static class SkillInstructionDefaults
                 Return ONLY these sections, in this order, separated by a blank line:
 
                 1. Agenda
-                   - Include only today's/planned task names and event names
+                         - List calendar events first, then non-calendar tasks and other agenda items
+                         - For calendar events, include the local start time; if end time is available, use a time range
+                         - Use compact bullets such as: - 09:30-10:00 Team sync or - 14:00 Dentist
+                         - For non-calendar items, include only the task/item name
                    - One bullet per item
                    - No explanations, no suggestions, no prioritization commentary, no motivational text
                    - If there are no agenda items, write exactly: - No agenda items

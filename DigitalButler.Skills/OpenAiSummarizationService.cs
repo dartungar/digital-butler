@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 using DigitalButler.Common;
 
@@ -287,21 +288,30 @@ Do not invent items that are not present.
 
     private static string BuildUnifiedPrompt(List<ContextItem> items, string taskName)
     {
+        var isDailySummary = taskName.Equals("daily-summary", StringComparison.OrdinalIgnoreCase);
         var sb = new StringBuilder();
         sb.AppendLine("Summarize the following context items into a single unified summary.");
         sb.AppendLine("Merge information from all sources naturally. Do NOT separate by source.");
         sb.AppendLine();
         sb.AppendLine("Items:");
 
-        var groups = items.GroupBy(x => x.Source).OrderBy(g => g.Key);
+        var groups = items
+            .GroupBy(x => x.Source)
+            .OrderBy(g => GetUnifiedSourceOrder(g.Key, isDailySummary));
+
         foreach (var group in groups)
         {
             sb.AppendLine($"[Source: {group.Key}]");
-            foreach (var item in group)
+            foreach (var item in OrderItemsForUnifiedPrompt(group))
             {
                 var title = TruncateForPrompt(item.Title, MaxTitleCharsInPrompt);
                 var body = TruncateForPrompt(CompressBodyForPrompt(item.Body), MaxBodyCharsInPrompt);
                 sb.AppendLine($"- {title}: {body}");
+                if (group.Key == ContextSource.GoogleCalendar && TryExtractCalendarLocalTimeRange(item.Body, out var localTimeRange))
+                {
+                    sb.AppendLine($"  Local time: {localTimeRange}");
+                }
+
                 if (item.RelevantDate is not null)
                 {
                     sb.AppendLine($"  Relevant: {item.RelevantDate:O}");
@@ -310,6 +320,92 @@ Do not invent items that are not present.
         }
 
         return sb.ToString();
+    }
+
+    private static int GetUnifiedSourceOrder(ContextSource source, bool isDailySummary)
+    {
+        if (!isDailySummary)
+        {
+            return (int)source;
+        }
+
+        return source switch
+        {
+            ContextSource.GoogleCalendar => 0,
+            ContextSource.Obsidian => 1,
+            ContextSource.Gmail => 2,
+            ContextSource.Other => 3,
+            _ => 4
+        };
+    }
+
+    private static IEnumerable<ContextItem> OrderItemsForUnifiedPrompt(IGrouping<ContextSource, ContextItem> group)
+    {
+        if (group.Key == ContextSource.GoogleCalendar)
+        {
+            return group
+                .OrderBy(x => x.RelevantDate ?? DateTimeOffset.MaxValue)
+                .ThenBy(x => x.Title, StringComparer.OrdinalIgnoreCase);
+        }
+
+        return group
+            .OrderBy(x => x.RelevantDate ?? x.UpdatedAt)
+            .ThenBy(x => x.Title, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool TryExtractCalendarLocalTimeRange(string body, out string localTimeRange)
+    {
+        localTimeRange = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return false;
+        }
+
+        DateTime? start = null;
+        DateTime? end = null;
+
+        foreach (var rawLine in body.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (rawLine.StartsWith("Start: ", StringComparison.Ordinal) && TryParseCalendarLocalDateTime(rawLine[7..], out var parsedStart))
+            {
+                start = parsedStart;
+                continue;
+            }
+
+            if (rawLine.StartsWith("End: ", StringComparison.Ordinal) && TryParseCalendarLocalDateTime(rawLine[5..], out var parsedEnd))
+            {
+                end = parsedEnd;
+            }
+        }
+
+        if (start is null)
+        {
+            return false;
+        }
+
+        localTimeRange = end is not null
+            ? $"{start.Value:HH:mm}-{end.Value:HH:mm}"
+            : $"{start.Value:HH:mm}";
+
+        return true;
+    }
+
+    private static bool TryParseCalendarLocalDateTime(string value, out DateTime parsed)
+    {
+        parsed = default;
+
+        var tzSeparatorIndex = value.IndexOf(" (", StringComparison.Ordinal);
+        var timestamp = tzSeparatorIndex >= 0
+            ? value[..tzSeparatorIndex]
+            : value;
+
+        return DateTime.TryParseExact(
+            timestamp.Trim(),
+            "yyyy-MM-dd HH:mm",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out parsed);
     }
 
     private static string BuildPromptForOneSource(ContextSource source, IEnumerable<ContextItem> items, string taskName)

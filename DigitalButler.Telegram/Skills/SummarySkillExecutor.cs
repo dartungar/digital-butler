@@ -332,6 +332,12 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         sb.AppendLine("Skill: summary");
         sb.AppendLine($"Period: {period}");
 
+        if (string.Equals(period, "daily", StringComparison.OrdinalIgnoreCase))
+        {
+            sb.AppendLine("Agenda requirements: list Google Calendar events before all other agenda items.");
+            sb.AppendLine("For each calendar event, include the local start time; if an end time exists, include a time range in HH:mm-HH:mm format.");
+        }
+
         if (!string.IsNullOrWhiteSpace(custom))
         {
             sb.AppendLine();
