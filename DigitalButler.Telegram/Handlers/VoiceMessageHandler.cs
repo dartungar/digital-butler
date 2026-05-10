@@ -1,5 +1,4 @@
 using DigitalButler.Common;
-using DigitalButler.Context;
 using DigitalButler.Skills;
 using DigitalButler.Skills.VaultSearch;
 using DigitalButler.Telegram.Skills;
@@ -25,8 +24,6 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
     private readonly IActivitiesSkillExecutor _activitiesExecutor;
     private readonly ICalendarEventSkillExecutor _calendarExecutor;
     private readonly IVaultSearchSkillExecutor _vaultSearchExecutor;
-    private readonly IObsidianCaptureService _obsidianCapture;
-    private readonly ITimeZoneProvider _timeZoneProvider;
     private readonly ConversationStateManager _stateManager;
 
     public VoiceMessageHandler(
@@ -41,8 +38,6 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
         IActivitiesSkillExecutor activitiesExecutor,
         ICalendarEventSkillExecutor calendarExecutor,
         IVaultSearchSkillExecutor vaultSearchExecutor,
-        IObsidianCaptureService obsidianCapture,
-        ITimeZoneProvider timeZoneProvider,
         ConversationStateManager stateManager)
     {
         _logger = logger;
@@ -55,8 +50,6 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
         _activitiesExecutor = activitiesExecutor;
         _calendarExecutor = calendarExecutor;
         _vaultSearchExecutor = vaultSearchExecutor;
-        _obsidianCapture = obsidianCapture;
-        _timeZoneProvider = timeZoneProvider;
         _stateManager = stateManager;
 
         var allowedUserIdStr = config["TELEGRAM_ALLOWED_USER_ID"];
@@ -86,24 +79,13 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
             var audioData = await _mediaDownloadService.DownloadFileAsync(bot, message.Voice.FileId, ct);
             var transcript = await _transcriptionService.TranscribeAsync(audioData, $"voice_{message.Voice.FileId}.ogg", ct);
 
-            if (_stateManager.GetAndRemovePendingObsidianCapture(chatId) is { } pendingTarget)
-            {
-                await HandleAddToObsidianAsync(bot, chatId, new ObsidianCaptureRequest
-                {
-                    TextContent = transcript.Text?.Trim(),
-                    MediaBytes = audioData,
-                    MediaFileExtension = ".ogg"
-                }, pendingTarget, ct);
-                return;
-            }
-
             if (string.IsNullOrWhiteSpace(transcript.Text))
             {
                 await SendWithKeyboardAsync(bot, chatId, "I couldn't transcribe this voice message.", ct);
                 return;
             }
 
-            await HandleSkillRoutingAsync(bot, chatId, transcript.Text.Trim(), audioData, ".ogg", ct);
+            await HandleSkillRoutingAsync(bot, chatId, transcript.Text.Trim(), ct);
         }
         catch (Exception ex)
         {
@@ -112,7 +94,7 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
         }
     }
 
-    private async Task HandleSkillRoutingAsync(ITelegramBotClient bot, long chatId, string text, byte[]? mediaBytes, string? mediaExtension, CancellationToken ct)
+    private async Task HandleSkillRoutingAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)
     {
         var routingResult = await _skillRouter.RouteWithEnrichmentAsync(text, ct);
 
@@ -123,15 +105,13 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
         if (routingResult.NeedsVaultEnrichment)
         {
             vaultQuery = routingResult.VaultSearchQuery ?? text;
-            var tz = await _timeZoneProvider.GetTimeZoneInfoAsync(ct);
-            var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
-            var translated = _dateTranslator.TranslateQuery(vaultQuery, localNow);
+            var translated = _dateTranslator.TranslateQuery(vaultQuery, DateTimeOffset.UtcNow);
             startDate = translated.StartDate;
             endDate = translated.EndDate;
 
             if (!startDate.HasValue && !endDate.HasValue)
             {
-                translated = _dateTranslator.TranslateQuery(text, localNow);
+                translated = _dateTranslator.TranslateQuery(text, DateTimeOffset.UtcNow);
                 startDate = translated.StartDate;
                 endDate = translated.EndDate;
             }
@@ -148,9 +128,6 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
             case ButlerSkill.CalendarEvent:
                 var eventText = CalendarEventSkillExecutor.TryExtractEventText(text) ?? text;
                 await HandleAddEventAsync(bot, chatId, eventText, ct);
-                break;
-            case ButlerSkill.AddToObsidian:
-                await HandleAddToObsidianRouteAsync(bot, chatId, text, mediaBytes, mediaExtension ?? ".ogg", ct);
                 break;
             case ButlerSkill.VaultSearch:
                 if (startDate.HasValue && endDate.HasValue)
@@ -256,90 +233,6 @@ public sealed class VoiceMessageHandler : IVoiceMessageHandler
         await SendWithKeyboardAsync(bot, chatId, "Searching vault...", ct);
         var result = await _vaultSearchExecutor.ExecuteAsync(query, ct);
         await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(result), ct);
-    }
-
-    private async Task HandleAddToObsidianRouteAsync(
-        ITelegramBotClient bot,
-        long chatId,
-        string text,
-        byte[]? mediaBytes,
-        string mediaExtension,
-        CancellationToken ct)
-    {
-        var target = DetermineObsidianTarget(text);
-        var content = ExtractObsidianCaptureText(text);
-        await HandleAddToObsidianAsync(bot, chatId, new ObsidianCaptureRequest
-        {
-            TextContent = content,
-            MediaBytes = mediaBytes,
-            MediaFileExtension = mediaExtension
-        }, target, ct);
-    }
-
-    private async Task HandleAddToObsidianAsync(
-        ITelegramBotClient bot,
-        long chatId,
-        ObsidianCaptureRequest request,
-        ObsidianCaptureTarget target,
-        CancellationToken ct)
-    {
-        if (!request.HasContent)
-        {
-            await SendWithKeyboardAsync(bot, chatId, "Nothing to save.", ct);
-            return;
-        }
-
-        var result = target == ObsidianCaptureTarget.DailyNote
-            ? await _obsidianCapture.AppendToTodayDailyNoteAsync(request, ct)
-            : await _obsidianCapture.AppendToInboxNoteAsync(request, ct);
-
-        var mediaLine = string.IsNullOrWhiteSpace(result.MediaFileName)
-            ? string.Empty
-            : $"\nMedia: {result.MediaFileName}";
-        await SendWithKeyboardAsync(bot, chatId, $"Saved to {result.TargetDescription}: {result.NotePath}{mediaLine}", ct);
-    }
-
-    private static ObsidianCaptureTarget DetermineObsidianTarget(string text)
-    {
-        var normalized = text.ToLowerInvariant();
-        return normalized.Contains("daily note", StringComparison.Ordinal) ||
-               normalized.Contains("today's note", StringComparison.Ordinal) ||
-               normalized.Contains("today note", StringComparison.Ordinal)
-            ? ObsidianCaptureTarget.DailyNote
-            : ObsidianCaptureTarget.Inbox;
-    }
-
-    private static string? ExtractObsidianCaptureText(string text)
-    {
-        var trimmed = text.Trim();
-        var colon = trimmed.IndexOf(':');
-        if (colon >= 0)
-        {
-            return trimmed[(colon + 1)..].Trim();
-        }
-
-        string[] prefixes =
-        [
-            "save this to obsidian",
-            "save to obsidian",
-            "add this voice note to obsidian",
-            "add this to obsidian",
-            "add to obsidian",
-            "append this to obsidian",
-            "capture this to obsidian",
-            "add this to my daily note",
-            "save this to my daily note"
-        ];
-
-        foreach (var prefix in prefixes)
-        {
-            if (trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return trimmed[prefix.Length..].Trim().TrimStart(':', '-', ' ').Trim();
-            }
-        }
-
-        return trimmed;
     }
 
     private static Task SendWithKeyboardAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)

@@ -11,16 +11,13 @@ using DigitalButler.Data.Repositories;
 
 namespace DigitalButler.Context;
 
-public sealed class GoogleCalendarContextSource : IContextSource, IStaleContextCleanupSource
+public sealed class GoogleCalendarContextSource : IContextSource
 {
     private readonly HttpClient _httpClient;
     private readonly GoogleCalendarOptions _options;
     private readonly ILogger<GoogleCalendarContextSource> _logger;
     private readonly GoogleCalendarFeedRepository _feeds;
     private readonly TimeZoneService _timeZones;
-    private bool _canCleanStaleItems;
-    private DateTimeOffset? _cleanupWindowStartUtc;
-    private DateTimeOffset? _cleanupWindowEndUtc;
 
     public GoogleCalendarContextSource(HttpClient httpClient, GoogleCalendarFeedRepository feeds, IOptions<GoogleCalendarOptions> options, TimeZoneService timeZones, ILogger<GoogleCalendarContextSource> logger)
     {
@@ -32,16 +29,9 @@ public sealed class GoogleCalendarContextSource : IContextSource, IStaleContextC
     }
 
     public ContextSource Source => ContextSource.GoogleCalendar;
-    public bool CanCleanStaleItems => _canCleanStaleItems;
-    public DateTimeOffset? CleanupWindowStartUtc => _cleanupWindowStartUtc;
-    public DateTimeOffset? CleanupWindowEndUtc => _cleanupWindowEndUtc;
 
     public async Task<IReadOnlyList<ContextItem>> FetchAsync(CancellationToken ct = default)
     {
-        _canCleanStaleItems = false;
-        _cleanupWindowStartUtc = null;
-        _cleanupWindowEndUtc = null;
-
         var feeds = await GetFeedsAsync(ct);
         if (feeds.Count == 0)
         {
@@ -54,11 +44,8 @@ public sealed class GoogleCalendarContextSource : IContextSource, IStaleContextC
         var now = DateTimeOffset.UtcNow;
         var windowStart = now.AddDays(-Math.Abs(_options.DaysBack));
         var windowEnd = now.AddDays(Math.Abs(_options.DaysForward));
-        _cleanupWindowStartUtc = windowStart;
-        _cleanupWindowEndUtc = windowEnd;
 
         var results = new List<ContextItem>(capacity: 256);
-        var hadErrors = false;
 
         foreach (var feed in feeds)
         {
@@ -74,7 +61,6 @@ public sealed class GoogleCalendarContextSource : IContextSource, IStaleContextC
                 if (calendar is null)
                 {
                     _logger.LogWarning("Failed to parse iCal feed '{FeedName}' (Calendar.Load returned null)", feed.Name);
-                    hadErrors = true;
                     continue;
                 }
 
@@ -141,12 +127,10 @@ public sealed class GoogleCalendarContextSource : IContextSource, IStaleContextC
             }
             catch (Exception ex)
             {
-                hadErrors = true;
                 _logger.LogWarning(ex, "Failed to fetch/parse iCal feed '{FeedName}'", feed.Name);
             }
         }
 
-        _canCleanStaleItems = !hadErrors;
         return results;
     }
 

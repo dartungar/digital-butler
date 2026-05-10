@@ -83,7 +83,6 @@ Pick exactly one skill for the user's message:
 - motivation (motivational message based on Obsidian notes/context)
 - activities (suggest what to do based on energy/mood)
 - calendar_event (create a new calendar event)
-- add_to_obsidian (capture text or media into Obsidian)
 - unknown (message does not clearly match any skill)
 - vault_search (search user's notes/knowledge base)
 
@@ -96,7 +95,7 @@ Return a JSON object with exactly these fields:
   "vault_query": "<search query or null>"
 }
 
-Skill tokens: summary_daily, summary_weekly, motivation, activities, calendar_event, add_to_obsidian, unknown, vault_search
+Skill tokens: summary_daily, summary_weekly, motivation, activities, calendar_event, unknown, vault_search
 
 Rules for needs_vault:
 - TRUE if the message references specific projects, topics, or past events that might be in notes
@@ -104,10 +103,8 @@ Rules for needs_vault:
 - TRUE for vault_search skill (always)
 - FALSE for simple agenda/calendar queries
 - FALSE for calendar_event creation (doesn't need context from notes)
-- FALSE for add_to_obsidian
 - FALSE for unknown
 
-Return add_to_obsidian when the user explicitly asks to save, add, append, capture, or remember something in Obsidian/notes/inbox/daily note.
 Return unknown when the message is just a standalone note, thought, reminder, shopping list, journal fragment, or anything else that does not clearly ask for one of the supported skills.
 
 For vault_query: Extract the core search topic. If dates are mentioned, keep them in the query.
@@ -138,10 +135,10 @@ User: schedule a meeting with John tomorrow at 3pm
 {"skill":"calendar_event","needs_vault":false,"vault_query":null}
 
 User: save this to obsidian: buy oat milk and bananas
-{"skill":"add_to_obsidian","needs_vault":false,"vault_query":null}
+{"skill":"unknown","needs_vault":false,"vault_query":null}
 
 User: add this photo to my inbox note in obsidian
-{"skill":"add_to_obsidian","needs_vault":false,"vault_query":null}
+{"skill":"unknown","needs_vault":false,"vault_query":null}
 
 User: buy oat milk and bananas
 {"skill":"unknown","needs_vault":false,"vault_query":null}
@@ -256,7 +253,6 @@ User: find my notes on cooking recipes
         if (token.Contains("motivation") || token is "mot" or "motiv" or "motivational") { skill = ButlerSkill.Motivation; return true; }
         if (token.Contains("activities") || token is "act" or "activity") { skill = ButlerSkill.Activities; return true; }
         if (token.Contains("calendar_event") || token is "calendar" or "event" or "schedule") { skill = ButlerSkill.CalendarEvent; return true; }
-        if (token.Contains("add_to_obsidian") || token.Contains("save_to_obsidian") || token is "obsidian" or "addnote" or "save_note" or "capture_note") { skill = ButlerSkill.AddToObsidian; return true; }
         if (token.Contains("unknown") || token is "none" or "other" or "unmatched" or "fallback") { skill = ButlerSkill.Unknown; return true; }
         if (token.Contains("vault_search") || token is "vault" or "search" or "notes") { skill = ButlerSkill.VaultSearch; return true; }
 
@@ -284,14 +280,13 @@ User: find my notes on cooking recipes
         else if (token.Contains("motivation")) token = "motivation";
         else if (token.Contains("activities")) token = "activities";
         else if (token.Contains("calendar_event")) token = "calendar_event";
-        else if (token.Contains("add_to_obsidian") || token.Contains("save_to_obsidian")) token = "add_to_obsidian";
         else if (token.Contains("unknown")) token = "unknown";
 
         // Be tolerant of minor deviations (we still instruct the model not to abbreviate).
         if (token is "mot" or "motiv" or "motivational") token = "motivation";
         if (token is "act" or "activity") token = "activities";
         if (token is "calendar" or "event" or "schedule" or "add_event" or "newevent" or "addevent") token = "calendar_event";
-        if (token is "obsidian" or "save_to_obsidian" or "save_note" or "addnote" or "capture_note") token = "add_to_obsidian";
+        if (token is "obsidian" or "save_to_obsidian" or "save_note" or "addnote") token = "unknown";
         if (token is "unknown" or "none" or "other" or "fallback" or "unmatched") token = "unknown";
         if (token is "summary") token = "summary_daily";
 
@@ -305,9 +300,6 @@ User: find my notes on cooking recipes
                 return true;
             case "calendar_event":
                 route = new SkillRoute(ButlerSkill.CalendarEvent);
-                return true;
-            case "add_to_obsidian":
-                route = new SkillRoute(ButlerSkill.AddToObsidian);
                 return true;
             case "unknown":
                 route = new SkillRoute(ButlerSkill.Unknown);

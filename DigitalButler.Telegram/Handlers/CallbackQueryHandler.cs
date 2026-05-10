@@ -137,10 +137,6 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
             case "addevent":
                 await SendWithKeyboardAsync(bot, chatId, "To add an event, type:\n/addevent Meeting with John tomorrow at 3pm", ct);
                 break;
-
-            case "addnote":
-                await SendWithKeyboardAsync(bot, chatId, "To save to Obsidian, type:\n/addnote Buy oat milk\nor send a photo with a caption like \"save this to obsidian\".", ct);
-                break;
         }
     }
 

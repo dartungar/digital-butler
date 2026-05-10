@@ -60,8 +60,8 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         // If we have a date range from temporal detection, use it instead of default window
         if (startDate.HasValue && endDate.HasValue)
         {
-            var start = LocalDateStartUtc(startDate.Value, tz);
-            var end = LocalDateStartUtc(endDate.Value.AddDays(1), tz);
+            var start = new DateTimeOffset(startDate.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var end = new DateTimeOffset(endDate.Value.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
             items = await _contextService.GetForWindowAsync(start, end, take: 500, ct: ct);
         }
         else
@@ -206,12 +206,6 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
     {
         var (start, end) = TimeWindowHelper.GetWeeklyWindow(tz);
         return await _contextService.GetForWindowAsync(start, end, take: 500, ct: ct);
-    }
-
-    private static DateTimeOffset LocalDateStartUtc(DateOnly date, TimeZoneInfo tz)
-    {
-        var local = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(local, tz), TimeSpan.Zero);
     }
 
     private static List<ContextItem> PrioritizeItems(List<ContextItem> items, bool weekly, TimeZoneInfo tz)

@@ -11,7 +11,7 @@
     <ItemGroup>
         <ProjectReference Include="..\DigitalButler.Common\DigitalButler.Common.csproj" />
         <PackageReference Include="Dapper" Version="2.1.35" />
-        <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.7" />
+        <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0-preview.3.24172.4" />
         <PackageReference Include="sqlite-vec" Version="0.1.7-alpha.2.1" />
     </ItemGroup>
 

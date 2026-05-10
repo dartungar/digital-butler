@@ -139,8 +139,6 @@ if (envOverrides.Count > 0)
     builder.Configuration.AddInMemoryCollection(envOverrides);
 }
 
-ValidateAuthConfiguration(builder.Configuration);
-
 var sqlitePath = builder.Configuration["Database:SqlitePath"] ?? "data/butler.db";
 var sqliteConnectionString = $"Data Source={sqlitePath}";
 builder.Services.AddSingleton<IButlerDb>(_ => new SqliteButlerDb(sqliteConnectionString));
@@ -233,7 +231,6 @@ builder.Services.AddScoped<IDateQueryTranslator, DateQueryTranslator>();
 builder.Services.AddScoped<IVaultIndexer, VaultIndexer>();
 builder.Services.AddScoped<IVaultSearchService, VaultSearchService>();
 builder.Services.AddScoped<IVaultEnrichmentService, VaultEnrichmentService>();
-builder.Services.AddTelegramSkillExecutors();
 
 // Context updater registry - allows lookup by source
 builder.Services.AddScoped<IContextUpdaterRegistry, ContextUpdaterRegistry>();
@@ -264,7 +261,6 @@ builder.Services.AddScoped<AiTaskSettingsService>();
 builder.Services.AddScoped<ObsidianCaptureSettingsService>();
 builder.Services.AddScoped<IObsidianCaptureService, ObsidianCaptureService>();
 builder.Services.AddScoped<TimeZoneService>();
-builder.Services.AddScoped<ITimeZoneProvider>(sp => sp.GetRequiredService<TimeZoneService>());
 builder.Services.AddSingleton<IManualSyncRunner, ManualSyncRunner>();
 builder.Services.AddHealthChecks();
 
@@ -293,12 +289,10 @@ app.MapPost("/login", async (HttpContext http) =>
     var expectedUser = http.RequestServices.GetRequiredService<IConfiguration>()["Auth:Username"];
     var expectedPass = http.RequestServices.GetRequiredService<IConfiguration>()["Auth:Password"];
     var expectedHash = http.RequestServices.GetRequiredService<IConfiguration>()["Auth:PasswordHash"];
-    var isValidPassword = !string.IsNullOrWhiteSpace(expectedHash)
-        ? VerifyPasswordHash(password, expectedHash)
-        : VerifyPlainPassword(password, expectedPass ?? string.Empty);
-    var isValidUser = FixedTimeEquals(username, expectedUser ?? string.Empty);
-
-    if (isValidUser && isValidPassword)
+    var isValid = expectedHash is not null
+        ? Hash(password) == expectedHash
+        : password == expectedPass;
+    if (username == expectedUser && isValid)
     {
         var claims = new[] { new Claim(ClaimTypes.Name, username) };
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
@@ -379,75 +373,9 @@ using (var scope = app.Services.CreateScope())
 
 app.Run();
 
-static void ValidateAuthConfiguration(IConfiguration configuration)
+string Hash(string value)
 {
-    var username = configuration["Auth:Username"];
-    var password = configuration["Auth:Password"];
-    var passwordHash = configuration["Auth:PasswordHash"];
-
-    if (string.IsNullOrWhiteSpace(username))
-    {
-        throw new InvalidOperationException("Admin auth is not configured: set Auth:Username or BUTLER_ADMIN_USERNAME.");
-    }
-
-    if (string.IsNullOrWhiteSpace(passwordHash) && string.IsNullOrWhiteSpace(password))
-    {
-        throw new InvalidOperationException("Admin auth is not configured: set Auth:PasswordHash/BUTLER_ADMIN_PASSWORD_HASH or Auth:Password/BUTLER_ADMIN_PASSWORD.");
-    }
-
-    if (!string.IsNullOrWhiteSpace(passwordHash) && !IsSha256Hex(passwordHash))
-    {
-        throw new InvalidOperationException("Auth:PasswordHash must be a 64-character SHA-256 hex string.");
-    }
-}
-
-static bool VerifyPasswordHash(string password, string expectedHash)
-{
-    if (!TryParseHex(expectedHash, out var expectedBytes))
-    {
-        return false;
-    }
-
-    var actualBytes = SHA256.HashData(Encoding.UTF8.GetBytes(password));
-    return CryptographicOperations.FixedTimeEquals(actualBytes, expectedBytes);
-}
-
-static bool VerifyPlainPassword(string password, string expectedPassword)
-{
-    var actualBytes = SHA256.HashData(Encoding.UTF8.GetBytes(password));
-    var expectedBytes = SHA256.HashData(Encoding.UTF8.GetBytes(expectedPassword));
-    return CryptographicOperations.FixedTimeEquals(actualBytes, expectedBytes);
-}
-
-static bool FixedTimeEquals(string actual, string expected)
-{
-    var actualBytes = Encoding.UTF8.GetBytes(actual);
-    var expectedBytes = Encoding.UTF8.GetBytes(expected);
-    return actualBytes.Length == expectedBytes.Length &&
-           CryptographicOperations.FixedTimeEquals(actualBytes, expectedBytes);
-}
-
-static bool IsSha256Hex(string value)
-{
-    return value.Trim().Length == 64 && TryParseHex(value, out _);
-}
-
-static bool TryParseHex(string value, out byte[] bytes)
-{
-    bytes = Array.Empty<byte>();
-    var trimmed = value.Trim();
-    if (trimmed.Length % 2 != 0)
-    {
-        return false;
-    }
-
-    try
-    {
-        bytes = Convert.FromHexString(trimmed);
-        return true;
-    }
-    catch (FormatException)
-    {
-        return false;
-    }
+    using var sha = SHA256.Create();
+    var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(value));
+    return Convert.ToHexString(bytes);
 }

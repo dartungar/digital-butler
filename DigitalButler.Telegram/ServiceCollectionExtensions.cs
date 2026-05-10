@@ -3,32 +3,25 @@ using DigitalButler.Telegram.Handlers;
 using DigitalButler.Telegram.Skills;
 using DigitalButler.Telegram.State;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace DigitalButler.Telegram;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddTelegramSkillExecutors(this IServiceCollection services)
-    {
-        services.TryAddScoped<ISummarySkillExecutor, SummarySkillExecutor>();
-        services.TryAddScoped<IMotivationSkillExecutor, MotivationSkillExecutor>();
-        services.TryAddScoped<IActivitiesSkillExecutor, ActivitiesSkillExecutor>();
-        services.TryAddScoped<ICalendarEventSkillExecutor, CalendarEventSkillExecutor>();
-        services.TryAddScoped<IVaultSearchSkillExecutor, VaultSearchSkillExecutor>();
-
-        return services;
-    }
-
     public static IServiceCollection AddTelegramBot(this IServiceCollection services)
     {
         // Error notifier (singleton - shared across scheduler and handlers)
-        services.TryAddSingleton<ITelegramErrorNotifier, TelegramErrorNotifier>();
+        services.AddSingleton<ITelegramErrorNotifier, TelegramErrorNotifier>();
 
         // State management (singleton - shared across all handlers)
-        services.TryAddSingleton<ConversationStateManager>();
+        services.AddSingleton<ConversationStateManager>();
 
-        services.AddTelegramSkillExecutors();
+        // Skill executors (scoped - one per request)
+        services.AddScoped<ISummarySkillExecutor, SummarySkillExecutor>();
+        services.AddScoped<IMotivationSkillExecutor, MotivationSkillExecutor>();
+        services.AddScoped<IActivitiesSkillExecutor, ActivitiesSkillExecutor>();
+        services.AddScoped<ICalendarEventSkillExecutor, CalendarEventSkillExecutor>();
+        services.AddScoped<IVaultSearchSkillExecutor, VaultSearchSkillExecutor>();
 
         // Message handlers (scoped - one per request)
         services.AddScoped<ITextMessageHandler, TextMessageHandler>();

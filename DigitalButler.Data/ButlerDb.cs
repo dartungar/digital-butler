@@ -26,8 +26,6 @@ public sealed class SqliteButlerDb : IButlerDb
         var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(ct);
 
-        await ConfigureConnectionAsync(connection, ct);
-
         // Load sqlite-vec extension if available
         if (VecExtensionPath.Value is { } path)
         {
@@ -35,28 +33,6 @@ public sealed class SqliteButlerDb : IButlerDb
         }
 
         return connection;
-    }
-
-    private static async Task ConfigureConnectionAsync(SqliteConnection connection, CancellationToken ct)
-    {
-        await ExecutePragmaAsync(connection, "PRAGMA foreign_keys = ON;", ct);
-        await ExecutePragmaAsync(connection, "PRAGMA busy_timeout = 5000;", ct);
-
-        try
-        {
-            await ExecutePragmaAsync(connection, "PRAGMA journal_mode = WAL;", ct);
-        }
-        catch (SqliteException)
-        {
-            // WAL is unavailable for some SQLite targets such as in-memory databases.
-        }
-    }
-
-    private static async Task ExecutePragmaAsync(SqliteConnection connection, string commandText, CancellationToken ct)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = commandText;
-        await command.ExecuteNonQueryAsync(ct);
     }
 
     private static string? FindVecExtension()

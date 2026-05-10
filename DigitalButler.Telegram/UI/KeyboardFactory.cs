@@ -10,8 +10,7 @@ public static class KeyboardFactory
         {
             new[] { new KeyboardButton("/daily"), new KeyboardButton("/weekly") },
             new[] { new KeyboardButton("/motivation"), new KeyboardButton("/activities") },
-            new[] { new KeyboardButton("/search"), new KeyboardButton("/addnote") },
-            new[] { new KeyboardButton("/sync") }
+            new[] { new KeyboardButton("/search"), new KeyboardButton("/sync") }
         })
         {
             ResizeKeyboard = true
@@ -34,8 +33,7 @@ public static class KeyboardFactory
             },
             new[]
             {
-                InlineKeyboardButton.WithCallbackData("Add Event", "help:addevent"),
-                InlineKeyboardButton.WithCallbackData("Add Note", "help:addnote")
+                InlineKeyboardButton.WithCallbackData("Add Event", "help:addevent")
             }
         });
     }

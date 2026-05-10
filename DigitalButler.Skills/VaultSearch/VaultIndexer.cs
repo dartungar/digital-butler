@@ -19,8 +19,6 @@ public interface IVaultIndexer
 
 public partial class VaultIndexer : IVaultIndexer
 {
-    private static readonly SemaphoreSlim IndexLock = new(1, 1);
-
     private readonly VaultSearchRepository _repo;
     private readonly IEmbeddingService _embeddingService;
     private readonly INoteChunker _chunker;
@@ -42,19 +40,6 @@ public partial class VaultIndexer : IVaultIndexer
     }
 
     public async Task<VaultIndexingResult> IndexVaultAsync(CancellationToken ct = default)
-    {
-        await IndexLock.WaitAsync(ct);
-        try
-        {
-            return await IndexVaultCoreAsync(ct);
-        }
-        finally
-        {
-            IndexLock.Release();
-        }
-    }
-
-    private async Task<VaultIndexingResult> IndexVaultCoreAsync(CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
         var result = new VaultIndexingResult();
@@ -141,19 +126,6 @@ public partial class VaultIndexer : IVaultIndexer
 
     public async Task<VaultIndexingResult> IndexNoteAsync(string filePath, CancellationToken ct = default)
     {
-        await IndexLock.WaitAsync(ct);
-        try
-        {
-            return await IndexNoteCoreAsync(filePath, ct);
-        }
-        finally
-        {
-            IndexLock.Release();
-        }
-    }
-
-    private async Task<VaultIndexingResult> IndexNoteCoreAsync(string filePath, CancellationToken ct)
-    {
         var sw = Stopwatch.StartNew();
         var result = new VaultIndexingResult { NotesScanned = 1 };
 
@@ -184,17 +156,9 @@ public partial class VaultIndexer : IVaultIndexer
 
     public async Task RemoveNoteAsync(string filePath, CancellationToken ct = default)
     {
-        await IndexLock.WaitAsync(ct);
-        try
-        {
-            var relativePath = GetRelativePath(filePath);
-            await _repo.DeleteNoteAsync(relativePath, ct);
-            _logger.LogDebug("Removed note from index: {Path}", relativePath);
-        }
-        finally
-        {
-            IndexLock.Release();
-        }
+        var relativePath = GetRelativePath(filePath);
+        await _repo.DeleteNoteAsync(relativePath, ct);
+        _logger.LogDebug("Removed note from index: {Path}", relativePath);
     }
 
     private List<string> GetVaultFiles()
@@ -223,13 +187,48 @@ public partial class VaultIndexer : IVaultIndexer
     {
         if (filePaths.Count == 0) return;
 
-        var preparedNotes = new List<PreparedNote>();
+        // Process files and collect all chunks
+        var allChunksToEmbed = new List<(string filePath, NoteChunk chunk)>();
 
         foreach (var filePath in filePaths)
         {
             try
             {
-                preparedNotes.Add(await PrepareNoteAsync(filePath, ct));
+                var content = await File.ReadAllTextAsync(filePath, ct);
+                var relativePath = GetRelativePath(filePath);
+                var title = ExtractTitle(content, filePath);
+                var contentHash = ComputeHash(content);
+                var fileModified = File.GetLastWriteTimeUtc(filePath);
+
+                // Create/update the note record
+                var note = new VaultNote
+                {
+                    FilePath = relativePath,
+                    Title = title,
+                    ContentHash = contentHash,
+                    FileModifiedAt = fileModified,
+                    UpdatedAt = DateTimeOffset.UtcNow
+                };
+
+                var noteId = await _repo.UpsertNoteAsync(note, ct);
+                note.Id = noteId;
+
+                // Chunk the content
+                var chunks = _chunker.ChunkNote(content, relativePath, title).ToList();
+
+                foreach (var chunkInfo in chunks)
+                {
+                    var chunk = new NoteChunk
+                    {
+                        NoteId = noteId,
+                        ChunkIndex = chunkInfo.ChunkIndex,
+                        ChunkText = chunkInfo.Text,
+                        StartLine = chunkInfo.StartLine,
+                        EndLine = chunkInfo.EndLine
+                    };
+
+                    allChunksToEmbed.Add((filePath, chunk));
+                }
             }
             catch (Exception ex)
             {
@@ -238,12 +237,8 @@ public partial class VaultIndexer : IVaultIndexer
             }
         }
 
-        var allChunksToEmbed = preparedNotes
-            .SelectMany(note => note.Chunks.Select(chunk => (note.FilePath, chunk)))
-            .ToList();
-
         // Generate embeddings in batches
-        var batchSize = Math.Max(1, _options.EmbeddingBatchSize);
+        var batchSize = _options.EmbeddingBatchSize;
         var batches = allChunksToEmbed.Chunk(batchSize).ToList();
 
         _logger.LogDebug("Generating embeddings for {Count} chunks in {Batches} batches", allChunksToEmbed.Count, batches.Count);
@@ -256,15 +251,20 @@ public partial class VaultIndexer : IVaultIndexer
             {
                 var texts = batch.Select(b => b.chunk.ChunkText).ToList();
                 var embeddings = await _embeddingService.GetEmbeddingsAsync(texts, ct);
-                if (embeddings.Count != batch.Length)
-                {
-                    throw new InvalidOperationException($"Embedding service returned {embeddings.Count} embeddings for {batch.Length} chunks.");
-                }
 
                 // Assign embeddings to chunks
                 for (int i = 0; i < batch.Length; i++)
                 {
                     batch[i].chunk.Embedding = embeddings[i];
+                }
+
+                // Group chunks by note and save
+                var chunksByNote = batch.GroupBy(b => b.chunk.NoteId);
+                foreach (var noteGroup in chunksByNote)
+                {
+                    var noteChunks = noteGroup.Select(g => g.chunk).OrderBy(c => c.ChunkIndex).ToList();
+                    await _repo.ReplaceChunksForNoteAsync(noteGroup.Key, noteChunks, ct);
+                    result.ChunksCreated += noteChunks.Count;
                 }
             }
             catch (Exception ex)
@@ -273,90 +273,44 @@ public partial class VaultIndexer : IVaultIndexer
                 result.Errors.Add($"Embedding error: {ex.Message}");
             }
         }
-
-        foreach (var prepared in preparedNotes)
-        {
-            if (prepared.Chunks.Any(c => c.Embedding is not { Length: > 0 }))
-            {
-                _logger.LogWarning("Skipping note {Path} because embeddings were not generated for every chunk", prepared.RelativePath);
-                result.Errors.Add($"Embedding incomplete for {prepared.RelativePath}; kept existing index data.");
-                continue;
-            }
-
-            try
-            {
-                await _repo.SaveNoteWithChunksAsync(prepared.Note, prepared.Chunks, ct);
-                result.ChunksCreated += prepared.Chunks.Count;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Error saving indexed note {Path}", prepared.RelativePath);
-                result.Errors.Add($"Error saving {prepared.RelativePath}: {ex.Message}");
-            }
-        }
     }
 
     private async Task ProcessNoteAsync(string filePath, VaultIndexingResult result, CancellationToken ct)
-    {
-        var prepared = await PrepareNoteAsync(filePath, ct);
-        var texts = prepared.Chunks.Select(c => c.ChunkText).ToList();
-        if (texts.Count == 0)
-        {
-            await _repo.SaveNoteWithChunksAsync(prepared.Note, prepared.Chunks, ct);
-            result.ChunksCreated = 0;
-            return;
-        }
-
-        var embeddings = await _embeddingService.GetEmbeddingsAsync(texts, ct);
-        if (embeddings.Count != prepared.Chunks.Count)
-        {
-            throw new InvalidOperationException($"Embedding service returned {embeddings.Count} embeddings for {prepared.Chunks.Count} chunks.");
-        }
-
-        for (var i = 0; i < prepared.Chunks.Count; i++)
-        {
-            prepared.Chunks[i].Embedding = embeddings[i];
-        }
-
-        await _repo.SaveNoteWithChunksAsync(prepared.Note, prepared.Chunks, ct);
-        result.ChunksCreated = prepared.Chunks.Count;
-    }
-
-    private async Task<PreparedNote> PrepareNoteAsync(string filePath, CancellationToken ct)
     {
         var content = await File.ReadAllTextAsync(filePath, ct);
         var relativePath = GetRelativePath(filePath);
         var title = ExtractTitle(content, filePath);
         var contentHash = ComputeHash(content);
         var fileModified = File.GetLastWriteTimeUtc(filePath);
-        var existing = await _repo.GetNoteByPathAsync(relativePath, ct);
 
         var note = new VaultNote
         {
-            Id = existing?.Id ?? Guid.NewGuid(),
             FilePath = relativePath,
             Title = title,
             ContentHash = contentHash,
             FileModifiedAt = fileModified,
-            CreatedAt = existing?.CreatedAt ?? DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };
 
-        var chunks = _chunker.ChunkNote(content, relativePath, title)
-            .Select(chunkInfo => new NoteChunk
-            {
-                NoteId = note.Id,
-                ChunkIndex = chunkInfo.ChunkIndex,
-                ChunkText = chunkInfo.Text,
-                StartLine = chunkInfo.StartLine,
-                EndLine = chunkInfo.EndLine
-            })
-            .ToList();
+        var noteId = await _repo.UpsertNoteAsync(note, ct);
 
-        return new PreparedNote(filePath, relativePath, note, chunks);
+        var chunks = _chunker.ChunkNote(content, relativePath, title).ToList();
+        var texts = chunks.Select(c => c.Text).ToList();
+        var embeddings = await _embeddingService.GetEmbeddingsAsync(texts, ct);
+
+        var noteChunks = chunks.Select((c, i) => new NoteChunk
+        {
+            NoteId = noteId,
+            ChunkIndex = c.ChunkIndex,
+            ChunkText = c.Text,
+            StartLine = c.StartLine,
+            EndLine = c.EndLine,
+            Embedding = embeddings[i]
+        }).ToList();
+
+        await _repo.ReplaceChunksForNoteAsync(noteId, noteChunks, ct);
+        result.ChunksCreated = noteChunks.Count;
     }
-
-    private sealed record PreparedNote(string FilePath, string RelativePath, VaultNote Note, List<NoteChunk> Chunks);
 
     private string GetRelativePath(string fullPath)
     {

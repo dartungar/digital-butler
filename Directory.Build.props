@@ -1,5 +1,0 @@
-<Project>
-  <PropertyGroup>
-    <BuildInParallel>false</BuildInParallel>
-  </PropertyGroup>
-</Project>

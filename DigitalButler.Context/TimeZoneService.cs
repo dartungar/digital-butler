@@ -1,11 +1,10 @@
-using DigitalButler.Common;
 using DigitalButler.Data.Repositories;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace DigitalButler.Context;
 
-public sealed class TimeZoneService : ITimeZoneProvider
+public sealed class TimeZoneService
 {
     private const string TimeZoneKey = "timezone";
 

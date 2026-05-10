@@ -3,12 +3,6 @@ using DigitalButler.Skills;
 
 namespace DigitalButler.Telegram.State;
 
-public enum ObsidianCaptureTarget
-{
-    Inbox,
-    DailyNote
-}
-
 public class ConversationStateManager
 {
     private readonly ConcurrentDictionary<long, ConversationState> _states = new();
@@ -52,35 +46,6 @@ public class ConversationStateManager
         }
     }
 
-    public void SetPendingObsidianCapture(long chatId, ObsidianCaptureTarget target)
-    {
-        var state = GetOrCreateState(chatId);
-        state.PendingObsidianCaptureTarget = target;
-        state.PendingObsidianCaptureAt = DateTimeOffset.UtcNow;
-    }
-
-    public ObsidianCaptureTarget? GetAndRemovePendingObsidianCapture(long chatId)
-    {
-        if (!_states.TryGetValue(chatId, out var state))
-            return null;
-
-        var target = state.PendingObsidianCaptureTarget;
-        if (target is null)
-            return null;
-
-        if (state.PendingObsidianCaptureAt.HasValue &&
-            (DateTimeOffset.UtcNow - state.PendingObsidianCaptureAt.Value) > _defaultTtl)
-        {
-            state.PendingObsidianCaptureTarget = null;
-            state.PendingObsidianCaptureAt = null;
-            return null;
-        }
-
-        state.PendingObsidianCaptureTarget = null;
-        state.PendingObsidianCaptureAt = null;
-        return target;
-    }
-
     public void CleanupExpired()
     {
         var expiredChats = _states
@@ -97,12 +62,8 @@ public class ConversationStateManager
     private bool IsStateExpired(ConversationState state)
     {
         var now = DateTimeOffset.UtcNow;
-        var calendarExpired = state.PendingCalendarEvent is null ||
-                              (state.PendingCalendarEventAt.HasValue && (now - state.PendingCalendarEventAt.Value) > _defaultTtl);
-        var obsidianExpired = state.PendingObsidianCaptureTarget is null ||
-                              (state.PendingObsidianCaptureAt.HasValue && (now - state.PendingObsidianCaptureAt.Value) > _defaultTtl);
-
-        return calendarExpired && obsidianExpired;
+        return state.PendingCalendarEvent is null ||
+               (state.PendingCalendarEventAt.HasValue && (now - state.PendingCalendarEventAt.Value) > _defaultTtl);
     }
 
     private ConversationState GetOrCreateState(long chatId)
@@ -114,7 +75,5 @@ public class ConversationStateManager
     {
         public ParsedCalendarEvent? PendingCalendarEvent { get; set; }
         public DateTimeOffset? PendingCalendarEventAt { get; set; }
-        public ObsidianCaptureTarget? PendingObsidianCaptureTarget { get; set; }
-        public DateTimeOffset? PendingObsidianCaptureAt { get; set; }
     }
 }

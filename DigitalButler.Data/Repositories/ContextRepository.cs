@@ -280,52 +280,6 @@ public sealed class ContextRepository
         return affected;
     }
 
-    public async Task<int> DeleteMissingExternalIdsAsync(
-        ContextSource source,
-        IEnumerable<string> currentExternalIds,
-        DateTimeOffset? windowStartInclusive = null,
-        DateTimeOffset? windowEndExclusive = null,
-        CancellationToken ct = default)
-    {
-        var ids = currentExternalIds
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-        await using var conn = await _db.OpenAsync(ct);
-
-        var sql = """
-            DELETE FROM ContextItems
-            WHERE Source = @Source
-              AND ExternalId IS NOT NULL
-            """;
-
-        if (ids.Count > 0)
-        {
-            sql += " AND ExternalId NOT IN @ExternalIds";
-        }
-
-        if (windowStartInclusive is not null)
-        {
-            sql += " AND RelevantDate IS NOT NULL AND RelevantDate >= @WindowStart";
-        }
-
-        if (windowEndExclusive is not null)
-        {
-            sql += " AND RelevantDate IS NOT NULL AND RelevantDate < @WindowEnd";
-        }
-
-        sql += ";";
-
-        return await conn.ExecuteAsync(sql, new
-        {
-            Source = (int)source,
-            ExternalIds = ids,
-            WindowStart = windowStartInclusive,
-            WindowEnd = windowEndExclusive
-        });
-    }
-
     private sealed class ContextItemRow
     {
         public Guid Id { get; set; }
