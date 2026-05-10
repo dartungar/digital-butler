@@ -8,8 +8,10 @@ using Microsoft.Extensions.Options;
 
 namespace DigitalButler.Context;
 
-public sealed class ObsidianDailyNotesContextSource : IContextSource, IStaleContextCleanupSource
+public sealed class ObsidianDailyNotesContextSource : IContextSource, ICategorizedStaleContextCleanupSource
 {
+    public const string DailyNotesCategory = "Daily Notes";
+
     private readonly ObsidianOptions _options;
     private readonly ObsidianDailyNotesRepository _repo;
     private readonly ContextUpdateLogRepository _logRepo;
@@ -37,6 +39,7 @@ public sealed class ObsidianDailyNotesContextSource : IContextSource, IStaleCont
     public bool CanCleanStaleItems => _canCleanStaleItems;
     public DateTimeOffset? CleanupWindowStartUtc => _cleanupWindowStartUtc;
     public DateTimeOffset? CleanupWindowEndUtc => _cleanupWindowEndUtc;
+    public IReadOnlyCollection<string?> CleanupCategories { get; } = new[] { DailyNotesCategory };
 
     public async Task<IReadOnlyList<ContextItem>> FetchAsync(CancellationToken ct = default)
     {
@@ -173,12 +176,6 @@ public sealed class ObsidianDailyNotesContextSource : IContextSource, IStaleCont
             body.AppendLine($"Habits: {string.Join(", ", habits)}");
         }
 
-        // Add completed tasks
-        if (note.CompletedTasks?.Count > 0)
-        {
-            body.AppendLine($"Completed tasks: {string.Join("; ", note.CompletedTasks)}");
-        }
-
         // Add journal notes (truncated)
         if (!string.IsNullOrEmpty(note.Notes))
         {
@@ -197,7 +194,7 @@ public sealed class ObsidianDailyNotesContextSource : IContextSource, IStaleCont
             RelevantDate = LocalDateStartUtc(note.Date, tz),
             IsTimeless = false,
             ExternalId = $"obsidian:daily:{note.Date:yyyy-MM-dd}",
-            Category = "Daily Notes"
+            Category = DailyNotesCategory
         };
     }
 

@@ -24,6 +24,7 @@ public partial class VaultIndexer : IVaultIndexer
     private readonly VaultSearchRepository _repo;
     private readonly IEmbeddingService _embeddingService;
     private readonly INoteChunker _chunker;
+    private readonly IObsidianTaskContextIndexer _taskContextIndexer;
     private readonly VaultIndexerOptions _options;
     private readonly ILogger<VaultIndexer> _logger;
 
@@ -31,12 +32,14 @@ public partial class VaultIndexer : IVaultIndexer
         VaultSearchRepository repo,
         IEmbeddingService embeddingService,
         INoteChunker chunker,
+        IObsidianTaskContextIndexer taskContextIndexer,
         IOptions<VaultIndexerOptions> options,
         ILogger<VaultIndexer> logger)
     {
         _repo = repo;
         _embeddingService = embeddingService;
         _chunker = chunker;
+        _taskContextIndexer = taskContextIndexer;
         _options = options.Value;
         _logger = logger;
     }
@@ -118,6 +121,8 @@ public partial class VaultIndexer : IVaultIndexer
                 await _repo.DeleteNotesAsync(toRemove, ct);
                 result.NotesRemoved = toRemove.Count;
             }
+
+            await IndexVaultTasksAsync(allFiles, result, ct);
         }
         catch (Exception ex)
         {
@@ -170,6 +175,7 @@ public partial class VaultIndexer : IVaultIndexer
             }
 
             await ProcessNoteAsync(fullPath, result, ct);
+            await IndexVaultTasksAsync(GetVaultFiles(), result, ct);
             result.NotesAdded = 1;
         }
         catch (Exception ex)
@@ -354,6 +360,36 @@ public partial class VaultIndexer : IVaultIndexer
             .ToList();
 
         return new PreparedNote(filePath, relativePath, note, chunks);
+    }
+
+    private async Task IndexVaultTasksAsync(List<string> allFiles, VaultIndexingResult result, CancellationToken ct)
+    {
+        try
+        {
+            var taskResult = await _taskContextIndexer.IndexTasksAsync(allFiles, ct);
+            result.TasksIndexed = taskResult.TasksIndexed;
+            result.TasksRemoved = taskResult.TasksRemoved;
+            result.Errors.AddRange(taskResult.Errors.Select(e => $"Task indexing: {e}"));
+
+            if (taskResult.Errors.Count > 0)
+            {
+                _logger.LogWarning(
+                    "Vault task indexing completed with {ErrorCount} errors; skipped stale task cleanup",
+                    taskResult.Errors.Count);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Vault task indexing complete: {Indexed} tasks indexed, {Removed} stale tasks removed",
+                    taskResult.TasksIndexed,
+                    taskResult.TasksRemoved);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Failed to index Obsidian task context");
+            result.Errors.Add($"Task indexing error: {ex.Message}");
+        }
     }
 
     private sealed record PreparedNote(string FilePath, string RelativePath, VaultNote Note, List<NoteChunk> Chunks);

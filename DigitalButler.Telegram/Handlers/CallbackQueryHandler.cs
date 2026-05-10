@@ -1,3 +1,4 @@
+using DigitalButler.Common;
 using DigitalButler.Telegram.Skills;
 using DigitalButler.Telegram.State;
 using DigitalButler.Telegram.UI;
@@ -18,6 +19,7 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
     private readonly IMotivationSkillExecutor _motivationExecutor;
     private readonly IActivitiesSkillExecutor _activitiesExecutor;
     private readonly ICalendarEventSkillExecutor _calendarExecutor;
+    private readonly ITimeZoneProvider _timeZoneProvider;
 
     public CallbackQueryHandler(
         ILogger<CallbackQueryHandler> logger,
@@ -26,7 +28,8 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
         ISummarySkillExecutor summaryExecutor,
         IMotivationSkillExecutor motivationExecutor,
         IActivitiesSkillExecutor activitiesExecutor,
-        ICalendarEventSkillExecutor calendarExecutor)
+        ICalendarEventSkillExecutor calendarExecutor,
+        ITimeZoneProvider timeZoneProvider)
     {
         _logger = logger;
         _stateManager = stateManager;
@@ -34,6 +37,7 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
         _motivationExecutor = motivationExecutor;
         _activitiesExecutor = activitiesExecutor;
         _calendarExecutor = calendarExecutor;
+        _timeZoneProvider = timeZoneProvider;
 
         var allowedUserIdStr = config["TELEGRAM_ALLOWED_USER_ID"];
         _allowedUserId = string.IsNullOrWhiteSpace(allowedUserIdStr)
@@ -108,6 +112,15 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
                 }, ct);
                 break;
 
+            case "tomorrow":
+                await SendProcessingAndExecuteAsync(bot, chatId, "Generating tomorrow summary...", async () =>
+                {
+                    var tomorrow = await GetLocalDateOffsetAsync(daysOffset: 1, ct);
+                    var summary = await _summaryExecutor.ExecuteDailyForDateAsync(tomorrow, "on-demand-daily", ct);
+                    return (TruncateForTelegram(summary ?? "No summary available."), KeyboardFactory.BuildTomorrowSummaryRefreshKeyboard());
+                }, ct);
+                break;
+
             case "weekly":
                 await SendProcessingAndExecuteAsync(bot, chatId, "Generating weekly summary...", async () =>
                 {
@@ -148,6 +161,17 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
     {
         var action = data["summary:".Length..];
         await bot.AnswerCallbackQueryAsync(callbackQuery.Id, cancellationToken: ct);
+
+        if (action is "tomorrow" or "refresh_tomorrow")
+        {
+            await SendProcessingAndExecuteAsync(bot, chatId, "Generating tomorrow summary...", async () =>
+            {
+                var tomorrow = await GetLocalDateOffsetAsync(daysOffset: 1, ct);
+                var summary = await _summaryExecutor.ExecuteDailyForDateAsync(tomorrow, "on-demand-daily", ct);
+                return (TruncateForTelegram(summary ?? "No summary available."), KeyboardFactory.BuildTomorrowSummaryRefreshKeyboard());
+            }, ct);
+            return;
+        }
 
         var isWeekly = action is "weekly" or "refresh_weekly";
 
@@ -276,6 +300,13 @@ public sealed class CallbackQueryHandler : ICallbackQueryHandler
     private static Task SendWithKeyboardAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)
     {
         return bot.SendTextMessageAsync(chatId, text, replyMarkup: KeyboardFactory.BuildMainReplyKeyboard(), cancellationToken: ct);
+    }
+
+    private async Task<DateOnly> GetLocalDateOffsetAsync(int daysOffset, CancellationToken ct)
+    {
+        var tz = await _timeZoneProvider.GetTimeZoneInfoAsync(ct);
+        var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
+        return DateOnly.FromDateTime(localNow.DateTime).AddDays(daysOffset);
     }
 
     private static string TruncateForTelegram(string text, int maxLen = 3500)

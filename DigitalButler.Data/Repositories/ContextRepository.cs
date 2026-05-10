@@ -285,6 +285,8 @@ public sealed class ContextRepository
         IEnumerable<string> currentExternalIds,
         DateTimeOffset? windowStartInclusive = null,
         DateTimeOffset? windowEndExclusive = null,
+        string? category = null,
+        bool filterByCategory = false,
         CancellationToken ct = default)
     {
         var ids = currentExternalIds
@@ -315,6 +317,13 @@ public sealed class ContextRepository
             sql += " AND RelevantDate IS NOT NULL AND RelevantDate < @WindowEnd";
         }
 
+        if (filterByCategory)
+        {
+            sql += string.IsNullOrWhiteSpace(category)
+                ? " AND (Category IS NULL OR trim(Category) = '')"
+                : " AND Category = @Category";
+        }
+
         sql += ";";
 
         return await conn.ExecuteAsync(sql, new
@@ -322,7 +331,8 @@ public sealed class ContextRepository
             Source = (int)source,
             ExternalIds = ids,
             WindowStart = windowStartInclusive,
-            WindowEnd = windowEndExclusive
+            WindowEnd = windowEndExclusive,
+            Category = category
         });
     }
 

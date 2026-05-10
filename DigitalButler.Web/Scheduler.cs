@@ -632,13 +632,13 @@ public class SchedulerService : BackgroundService
             log.ItemsUpdated = result.NotesUpdated;
             log.ItemsScanned = result.ChunksCreated;
             log.DurationMs = (int)sw.ElapsedMilliseconds;
-            log.Details = $"Removed: {result.NotesRemoved}";
+            log.Details = $"Removed: {result.NotesRemoved}; Tasks indexed: {result.TasksIndexed}; Tasks removed: {result.TasksRemoved}";
 
             if (result.NotesAdded > 0 || result.NotesUpdated > 0 || result.NotesRemoved > 0)
             {
                 _logger.LogInformation(
-                    "{Trigger} vault indexing completed: {Added} added, {Updated} updated, {Removed} removed, {Chunks} chunks in {DurationMs}ms",
-                    trigger, result.NotesAdded, result.NotesUpdated, result.NotesRemoved, result.ChunksCreated, sw.ElapsedMilliseconds);
+                    "{Trigger} vault indexing completed: {Added} added, {Updated} updated, {Removed} removed, {Chunks} chunks, {Tasks} tasks in {DurationMs}ms",
+                    trigger, result.NotesAdded, result.NotesUpdated, result.NotesRemoved, result.ChunksCreated, result.TasksIndexed, sw.ElapsedMilliseconds);
             }
             else
             {

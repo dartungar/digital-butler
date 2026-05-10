@@ -42,7 +42,12 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
 
     public Task<string> ExecuteAsync(bool weekly, string taskName, CancellationToken ct)
     {
-        return ExecuteAsync(weekly, taskName, vaultQuery: null, startDate: null, endDate: null, ct);
+        return ExecuteCoreAsync(weekly, taskName, vaultQuery: null, startDate: null, endDate: null, includeDailyAnalysisForDateWindow: false, ct);
+    }
+
+    public Task<string> ExecuteDailyForDateAsync(DateOnly date, string taskName, CancellationToken ct)
+    {
+        return ExecuteCoreAsync(weekly: false, taskName, vaultQuery: null, startDate: date, endDate: date, includeDailyAnalysisForDateWindow: true, ct);
     }
 
     public async Task<string> ExecuteAsync(
@@ -51,6 +56,18 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         string? vaultQuery,
         DateOnly? startDate,
         DateOnly? endDate,
+        CancellationToken ct)
+    {
+        return await ExecuteCoreAsync(weekly, taskName, vaultQuery, startDate, endDate, includeDailyAnalysisForDateWindow: false, ct);
+    }
+
+    private async Task<string> ExecuteCoreAsync(
+        bool weekly,
+        string taskName,
+        string? vaultQuery,
+        DateOnly? startDate,
+        DateOnly? endDate,
+        bool includeDailyAnalysisForDateWindow,
         CancellationToken ct)
     {
         var tz = await _tzService.GetTimeZoneInfoAsync(ct);
@@ -75,11 +92,16 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         var cfg = await GetSkillConfigAsync(skill, ct);
         var allowedMask = SkillContextDefaults.ResolveSourcesMask(skill, cfg?.ContextSourcesMask ?? -1);
         items = items.Where(x => ContextSourceMask.Contains(allowedMask, x.Source)).ToList();
-
-        items = PrioritizeItems(items, weekly, tz);
+        if (!weekly)
+        {
+            items = items
+                .Where(x => !string.Equals(x.Category, ObsidianDailyNotesContextSource.DailyNotesCategory, StringComparison.Ordinal))
+                .ToList();
+        }
 
         // Add vault enrichment if requested
-        if (!string.IsNullOrWhiteSpace(vaultQuery) || (startDate.HasValue && endDate.HasValue))
+        if (!string.IsNullOrWhiteSpace(vaultQuery) ||
+            (startDate.HasValue && endDate.HasValue && !includeDailyAnalysisForDateWindow))
         {
             try
             {
@@ -101,7 +123,7 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         // Note: Analysis is included directly in the prompt, not as a context item, to avoid separate "Obsidian" section
         string? obsidianAnalysisText = null;
         ObsidianAnalysisResult? obsidianResult = null;
-        if (!startDate.HasValue || !endDate.HasValue)
+        if (!startDate.HasValue || !endDate.HasValue || includeDailyAnalysisForDateWindow)
         {
             try
             {
@@ -160,12 +182,20 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
             return "No context items found for this period. Try running /sync and verify enabled sources in settings.";
         }
 
+        items = DeduplicateItems(items, tz);
+        items = PrioritizeItems(items, weekly, tz);
+
         var sources = items.Select(x => x.Source).Distinct().ToArray();
         var instructionsBySource = await _instructionService.GetBySourcesAsync(sources, ct);
         var skillInstructions = SkillInstructionDefaults.ResolveContent(skill, cfg?.Content);
         var period = weekly ? "weekly" : "daily";
         var dataFreshnessNote = BuildDataFreshnessNote(items, weekly, tz);
-        var result = await _summarizer.SummarizeUnifiedAsync(items, instructionsBySource, taskName, BuildSkillPrompt(period, skillInstructions, obsidianAnalysisText, dataFreshnessNote), ct);
+        var agendaDate = !weekly && startDate.HasValue && endDate.HasValue && startDate.Value == endDate.Value
+            ? startDate.Value
+            : (DateOnly?)null;
+        agendaDate ??= !weekly ? DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz).DateTime) : null;
+        var statsDate = !weekly ? obsidianResult?.PeriodStart : null;
+        var result = await _summarizer.SummarizeUnifiedAsync(items, instructionsBySource, taskName, BuildSkillPrompt(period, skillInstructions, obsidianAnalysisText, dataFreshnessNote, agendaDate, statsDate), ct);
 
         // Append citations if any
         if (citations.Count > 0)
@@ -212,6 +242,71 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
     {
         var local = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
         return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(local, tz), TimeSpan.Zero);
+    }
+
+    private static List<ContextItem> DeduplicateItems(List<ContextItem> items, TimeZoneInfo tz)
+    {
+        if (items.Count <= 1)
+        {
+            return items;
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<ContextItem>(items.Count);
+
+        foreach (var item in items)
+        {
+            var key = BuildDedupKey(item, tz);
+            if (seen.Add(key))
+            {
+                result.Add(item);
+            }
+        }
+
+        return result;
+    }
+
+    private static string BuildDedupKey(ContextItem item, TimeZoneInfo tz)
+    {
+        if (item.Source == ContextSource.GoogleCalendar)
+        {
+            var localStart = item.RelevantDate is null
+                ? ""
+                : TimeZoneInfo.ConvertTime(item.RelevantDate.Value, tz).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+
+            return $"calendar|{localStart}|{NormalizeForDedup(item.Title)}";
+        }
+
+        if (string.Equals(item.Category, ObsidianTaskContextIndexer.Category, StringComparison.Ordinal))
+        {
+            var localDate = item.RelevantDate is null
+                ? ""
+                : TimeZoneInfo.ConvertTime(item.RelevantDate.Value, tz).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+            return $"vault-task|{localDate}|{NormalizeForDedup(item.Title)}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.ExternalId))
+        {
+            return $"{item.Source}|external|{item.ExternalId}";
+        }
+
+        return $"{item.Source}|{item.Category}|{item.RelevantDate:O}|{NormalizeForDedup(item.Title)}";
+    }
+
+    private static string NormalizeForDedup(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var chars = value
+            .ToLowerInvariant()
+            .Where(ch => !char.IsPunctuation(ch) || ch is '#' or '/' or '-')
+            .ToArray();
+
+        return string.Join(" ", new string(chars).Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 
     private static List<ContextItem> PrioritizeItems(List<ContextItem> items, bool weekly, TimeZoneInfo tz)
@@ -332,16 +427,37 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
         return string.Join(", ", pieces);
     }
 
-    private static string BuildSkillPrompt(string period, string? custom, string? obsidianAnalysis = null, string? dataFreshness = null)
+    private static string BuildSkillPrompt(
+        string period,
+        string? custom,
+        string? obsidianAnalysis = null,
+        string? dataFreshness = null,
+        DateOnly? agendaDate = null,
+        DateOnly? statsDate = null)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("Skill: summary");
         sb.AppendLine($"Period: {period}");
+        if (agendaDate.HasValue)
+        {
+            sb.AppendLine($"Agenda local date: {agendaDate.Value:yyyy-MM-dd}");
+        }
+        if (statsDate.HasValue)
+        {
+            sb.AppendLine($"Stats/reflection date: {statsDate.Value:yyyy-MM-dd}");
+        }
 
         if (string.Equals(period, "daily", StringComparison.OrdinalIgnoreCase))
         {
             sb.AppendLine("Agenda requirements: list Google Calendar events before all other agenda items.");
+            if (agendaDate.HasValue)
+            {
+                sb.AppendLine("Build the Agenda for the agenda local date only.");
+            }
             sb.AppendLine("For each calendar event, include the local start time; if an end time exists, include a time range in HH:mm-HH:mm format.");
+            sb.AppendLine("Deduplicate agenda items: if the same calendar title has the same start time, or the same task text appears more than once, include it only once.");
+            sb.AppendLine("Include active Obsidian Tasks plugin items from the vault when their due, scheduled, or start date lands in the daily window.");
+            sb.AppendLine("Never treat note headings or section labels such as Tasks, Journal, Recurring, or Planned as agenda items.");
         }
 
         if (!string.IsNullOrWhiteSpace(custom))
@@ -349,6 +465,34 @@ public sealed class SummarySkillExecutor : ISummarySkillExecutor
             sb.AppendLine();
             sb.AppendLine("=== SKILL INSTRUCTIONS ===");
             sb.AppendLine(custom.Trim());
+        }
+
+        if (string.Equals(period, "daily", StringComparison.OrdinalIgnoreCase))
+        {
+            sb.AppendLine();
+            sb.AppendLine("=== DAILY SUMMARY FORMAT OVERRIDES ===");
+            if (agendaDate.HasValue && statsDate.HasValue)
+            {
+                sb.AppendLine($"Return exactly two sections with these exact headings: Agenda ({agendaDate.Value:yyyy-MM-dd}) and Yesterday ({statsDate.Value:yyyy-MM-dd}).");
+            }
+            else if (agendaDate.HasValue)
+            {
+                sb.AppendLine($"Return exactly two sections with these exact headings: Agenda ({agendaDate.Value:yyyy-MM-dd}) and Yesterday.");
+            }
+            else if (statsDate.HasValue)
+            {
+                sb.AppendLine($"Return exactly two sections with these exact headings: Agenda and Yesterday ({statsDate.Value:yyyy-MM-dd}).");
+            }
+            else
+            {
+                sb.AppendLine("Return exactly two sections: Agenda and Yesterday.");
+            }
+            sb.AppendLine("Agenda: compact bullets only. Calendar events first, then active tasks. Do not include duplicate events or duplicate tasks.");
+            sb.AppendLine("Agenda must be built only from actual events/tasks; markdown section headings are not agenda items.");
+            sb.AppendLine("Yesterday: write one short, natural note based on yesterday's Obsidian stats. Do not list raw metrics mechanically.");
+            sb.AppendLine("Do not output task status counts such as completed, pending, rescheduled, or cancelled.");
+            sb.AppendLine("Metric direction: higher is better for energy, motivation, life satisfaction, optimism, self esteem, and presence; 7+ is solid/positive and 4 or below is low.");
+            sb.AppendLine("Metric direction: lower is better for stress, irritability, and obsession; 0-3 is OK/low and 7+ is elevated.");
         }
 
         if (!string.IsNullOrWhiteSpace(dataFreshness))

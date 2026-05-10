@@ -230,6 +230,7 @@ builder.Services.AddScoped<IObsidianAnalysisService, ObsidianAnalysisService>();
 builder.Services.AddHttpClient<IEmbeddingService, OpenAiEmbeddingService>();
 builder.Services.AddScoped<INoteChunker, NoteChunker>();
 builder.Services.AddScoped<IDateQueryTranslator, DateQueryTranslator>();
+builder.Services.AddScoped<IObsidianTaskContextIndexer, ObsidianTaskContextIndexer>();
 builder.Services.AddScoped<IVaultIndexer, VaultIndexer>();
 builder.Services.AddScoped<IVaultSearchService, VaultSearchService>();
 builder.Services.AddScoped<IVaultEnrichmentService, VaultEnrichmentService>();

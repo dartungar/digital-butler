@@ -169,59 +169,13 @@ public sealed class ObsidianAnalysisService : IObsidianAnalysisService
         sb.AppendLine($"=== Obsidian Daily Notes Analysis ({analysis.PeriodStart:MMM dd} - {analysis.PeriodEnd:MMM dd}) ===");
         sb.AppendLine($"Days with data: {analysis.DaysWithData}");
 
-        // HEADS UP section - stats alerts (only for daily, placed prominently at top)
+        // Stats interpretation section - used by the daily summary's "Yesterday" note.
         if (!analysis.IsWeekly && analysis.StatsAlerts.Count > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("HEADS UP (based on yesterday's stats):");
+            sb.AppendLine("YESTERDAY'S STATS INTERPRETATION:");
             foreach (var alert in analysis.StatsAlerts)
                 sb.AppendLine($"  - {alert}");
-        }
-
-        // TODAY'S PLANNED TASKS section (only for daily)
-        if (!analysis.IsWeekly && analysis.HasTodayData &&
-            (analysis.TodayStarredTasks.Count > 0 || analysis.TodayAttentionTasks.Count > 0 || analysis.TodayPendingTasks.Count > 0))
-        {
-            sb.AppendLine();
-            sb.AppendLine("TODAY'S PLANNED TASKS (from today's daily note):");
-
-            if (analysis.TodayStarredTasks.Count > 0)
-            {
-                sb.AppendLine("  Priority [*]:");
-                foreach (var task in analysis.TodayStarredTasks.Take(5))
-                    sb.AppendLine($"    - {task}");
-                if (analysis.TodayStarredTasks.Count > 5)
-                    sb.AppendLine($"    ... and {analysis.TodayStarredTasks.Count - 5} more");
-            }
-
-            if (analysis.TodayAttentionTasks.Count > 0)
-            {
-                sb.AppendLine("  Needs attention [!]:");
-                foreach (var task in analysis.TodayAttentionTasks.Take(5))
-                    sb.AppendLine($"    - {task}");
-                if (analysis.TodayAttentionTasks.Count > 5)
-                    sb.AppendLine($"    ... and {analysis.TodayAttentionTasks.Count - 5} more");
-            }
-
-            if (analysis.TodayPendingTasks.Count > 0)
-            {
-                sb.AppendLine("  Pending [ ]:");
-                foreach (var task in analysis.TodayPendingTasks.Take(10))
-                    sb.AppendLine($"    - {task}");
-                if (analysis.TodayPendingTasks.Count > 10)
-                    sb.AppendLine($"    ... and {analysis.TodayPendingTasks.Count - 10} more");
-            }
-        }
-
-        // YESTERDAY'S ACCOMPLISHMENTS section (only for daily, for encouragement)
-        if (!analysis.IsWeekly && analysis.CompletedTasksList.Count > 0)
-        {
-            sb.AppendLine();
-            sb.AppendLine("YESTERDAY'S ACCOMPLISHMENTS (for encouragement):");
-            foreach (var task in analysis.CompletedTasksList.Take(10))
-                sb.AppendLine($"  - {task}");
-            if (analysis.CompletedTasksList.Count > 10)
-                sb.AppendLine($"  ... and {analysis.CompletedTasksList.Count - 10} more completed!");
         }
 
         // YESTERDAY'S JOURNAL section (only for daily, for context and tone)
@@ -237,8 +191,8 @@ public sealed class ObsidianAnalysisService : IObsidianAnalysisService
 
         sb.AppendLine();
 
-        // Metrics with deltas
-        sb.AppendLine("METRICS:");
+        // Metrics with deltas. The daily prompt explicitly asks the model not to copy this mechanically.
+        sb.AppendLine(analysis.IsWeekly ? "METRICS:" : "YESTERDAY'S RAW METRICS (do not copy mechanically):");
         if (analysis.AvgEnergy.HasValue)
             sb.AppendLine($"  Energy: {analysis.AvgEnergy:F1}{FormatDelta(analysis.EnergyDelta)}");
         if (analysis.AvgMotivation.HasValue)
@@ -265,96 +219,99 @@ public sealed class ObsidianAnalysisService : IObsidianAnalysisService
 
         sb.AppendLine();
 
-        // Tasks
-        sb.AppendLine("TASKS:");
-        sb.AppendLine($"  Completed [x]: {analysis.TotalCompletedTasks}");
-        if (analysis.CompletedTasksList.Count > 0)
+        if (analysis.IsWeekly)
         {
-            foreach (var task in analysis.CompletedTasksList.Take(10))
-                sb.AppendLine($"    - {task}");
-            if (analysis.CompletedTasksList.Count > 10)
-                sb.AppendLine($"    ... and {analysis.CompletedTasksList.Count - 10} more");
-        }
+            // Tasks
+            sb.AppendLine("TASKS:");
+            sb.AppendLine($"  Completed [x]: {analysis.TotalCompletedTasks}");
+            if (analysis.CompletedTasksList.Count > 0)
+            {
+                foreach (var task in analysis.CompletedTasksList.Take(10))
+                    sb.AppendLine($"    - {task}");
+                if (analysis.CompletedTasksList.Count > 10)
+                    sb.AppendLine($"    ... and {analysis.CompletedTasksList.Count - 10} more");
+            }
 
-        sb.AppendLine($"  Pending [ ]: {analysis.TotalPendingTasks}");
-        if (analysis.PendingTasksList.Count > 0)
-        {
-            foreach (var task in analysis.PendingTasksList.Take(5))
-                sb.AppendLine($"    - {task}");
-            if (analysis.PendingTasksList.Count > 5)
-                sb.AppendLine($"    ... and {analysis.PendingTasksList.Count - 5} more");
-        }
+            sb.AppendLine($"  Pending [ ]: {analysis.TotalPendingTasks}");
+            if (analysis.PendingTasksList.Count > 0)
+            {
+                foreach (var task in analysis.PendingTasksList.Take(5))
+                    sb.AppendLine($"    - {task}");
+                if (analysis.PendingTasksList.Count > 5)
+                    sb.AppendLine($"    ... and {analysis.PendingTasksList.Count - 5} more");
+            }
 
-        if (analysis.TotalPartiallyCompleteTasks > 0)
-        {
-            sb.AppendLine($"  Partially complete [/]: {analysis.TotalPartiallyCompleteTasks}");
-            foreach (var task in analysis.PartiallyCompleteTasksList.Take(5))
-                sb.AppendLine($"    - {task}");
-            if (analysis.PartiallyCompleteTasksList.Count > 5)
-                sb.AppendLine($"    ... and {analysis.PartiallyCompleteTasksList.Count - 5} more");
-        }
+            if (analysis.TotalPartiallyCompleteTasks > 0)
+            {
+                sb.AppendLine($"  Partially complete [/]: {analysis.TotalPartiallyCompleteTasks}");
+                foreach (var task in analysis.PartiallyCompleteTasksList.Take(5))
+                    sb.AppendLine($"    - {task}");
+                if (analysis.PartiallyCompleteTasksList.Count > 5)
+                    sb.AppendLine($"    ... and {analysis.PartiallyCompleteTasksList.Count - 5} more");
+            }
 
-        if (analysis.TotalInQuestionTasks > 0)
-        {
-            sb.AppendLine($"  In question [?]: {analysis.TotalInQuestionTasks}");
-            foreach (var task in analysis.InQuestionTasksList.Take(5))
-                sb.AppendLine($"    - {task}");
-            if (analysis.InQuestionTasksList.Count > 5)
-                sb.AppendLine($"    ... and {analysis.InQuestionTasksList.Count - 5} more");
-        }
+            if (analysis.TotalInQuestionTasks > 0)
+            {
+                sb.AppendLine($"  In question [?]: {analysis.TotalInQuestionTasks}");
+                foreach (var task in analysis.InQuestionTasksList.Take(5))
+                    sb.AppendLine($"    - {task}");
+                if (analysis.InQuestionTasksList.Count > 5)
+                    sb.AppendLine($"    ... and {analysis.InQuestionTasksList.Count - 5} more");
+            }
 
-        if (analysis.TotalRescheduledTasks > 0)
-        {
-            sb.AppendLine($"  Rescheduled [>]: {analysis.TotalRescheduledTasks}");
-            foreach (var task in analysis.RescheduledTasksList.Take(5))
-                sb.AppendLine($"    - {task}");
-            if (analysis.RescheduledTasksList.Count > 5)
-                sb.AppendLine($"    ... and {analysis.RescheduledTasksList.Count - 5} more");
-        }
+            if (analysis.TotalRescheduledTasks > 0)
+            {
+                sb.AppendLine($"  Rescheduled [>]: {analysis.TotalRescheduledTasks}");
+                foreach (var task in analysis.RescheduledTasksList.Take(5))
+                    sb.AppendLine($"    - {task}");
+                if (analysis.RescheduledTasksList.Count > 5)
+                    sb.AppendLine($"    ... and {analysis.RescheduledTasksList.Count - 5} more");
+            }
 
-        if (analysis.TotalCancelledTasks > 0)
-        {
-            sb.AppendLine($"  Cancelled [-]: {analysis.TotalCancelledTasks}");
-            foreach (var task in analysis.CancelledTasksList.Take(5))
-                sb.AppendLine($"    - {task}");
-            if (analysis.CancelledTasksList.Count > 5)
-                sb.AppendLine($"    ... and {analysis.CancelledTasksList.Count - 5} more");
-        }
+            if (analysis.TotalCancelledTasks > 0)
+            {
+                sb.AppendLine($"  Cancelled [-]: {analysis.TotalCancelledTasks}");
+                foreach (var task in analysis.CancelledTasksList.Take(5))
+                    sb.AppendLine($"    - {task}");
+                if (analysis.CancelledTasksList.Count > 5)
+                    sb.AppendLine($"    ... and {analysis.CancelledTasksList.Count - 5} more");
+            }
 
-        if (analysis.TotalStarredTasks > 0)
-        {
-            sb.AppendLine($"  Starred [*]: {analysis.TotalStarredTasks}");
-            foreach (var task in analysis.StarredTasksList.Take(5))
-                sb.AppendLine($"    - {task}");
-            if (analysis.StarredTasksList.Count > 5)
-                sb.AppendLine($"    ... and {analysis.StarredTasksList.Count - 5} more");
-        }
+            if (analysis.TotalStarredTasks > 0)
+            {
+                sb.AppendLine($"  Starred [*]: {analysis.TotalStarredTasks}");
+                foreach (var task in analysis.StarredTasksList.Take(5))
+                    sb.AppendLine($"    - {task}");
+                if (analysis.StarredTasksList.Count > 5)
+                    sb.AppendLine($"    ... and {analysis.StarredTasksList.Count - 5} more");
+            }
 
-        if (analysis.TotalAttentionTasks > 0)
-        {
-            sb.AppendLine($"  Needs attention [!]: {analysis.TotalAttentionTasks}");
-            foreach (var task in analysis.AttentionTasksList.Take(5))
-                sb.AppendLine($"    - {task}");
-            if (analysis.AttentionTasksList.Count > 5)
-                sb.AppendLine($"    ... and {analysis.AttentionTasksList.Count - 5} more");
-        }
+            if (analysis.TotalAttentionTasks > 0)
+            {
+                sb.AppendLine($"  Needs attention [!]: {analysis.TotalAttentionTasks}");
+                foreach (var task in analysis.AttentionTasksList.Take(5))
+                    sb.AppendLine($"    - {task}");
+                if (analysis.AttentionTasksList.Count > 5)
+                    sb.AppendLine($"    ... and {analysis.AttentionTasksList.Count - 5} more");
+            }
 
-        if (analysis.TotalInformationTasks > 0)
-        {
-            sb.AppendLine($"  Information [i]: {analysis.TotalInformationTasks}");
-            foreach (var task in analysis.InformationTasksList.Take(5))
-                sb.AppendLine($"    - {task}");
-            if (analysis.InformationTasksList.Count > 5)
-                sb.AppendLine($"    ... and {analysis.InformationTasksList.Count - 5} more");
-        }
+            if (analysis.TotalInformationTasks > 0)
+            {
+                sb.AppendLine($"  Information [i]: {analysis.TotalInformationTasks}");
+                foreach (var task in analysis.InformationTasksList.Take(5))
+                    sb.AppendLine($"    - {task}");
+                if (analysis.InformationTasksList.Count > 5)
+                    sb.AppendLine($"    ... and {analysis.InformationTasksList.Count - 5} more");
+            }
 
-        if (analysis.TotalIdeaTasks > 0)
-        {
-            sb.AppendLine($"  Ideas [I]: {analysis.TotalIdeaTasks}");
-            foreach (var task in analysis.IdeaTasksList.Take(5))
-                sb.AppendLine($"    - {task}");
-            if (analysis.IdeaTasksList.Count > 5)
-                sb.AppendLine($"    ... and {analysis.IdeaTasksList.Count - 5} more");
+            if (analysis.TotalIdeaTasks > 0)
+            {
+                sb.AppendLine($"  Ideas [I]: {analysis.TotalIdeaTasks}");
+                foreach (var task in analysis.IdeaTasksList.Take(5))
+                    sb.AppendLine($"    - {task}");
+                if (analysis.IdeaTasksList.Count > 5)
+                    sb.AppendLine($"    ... and {analysis.IdeaTasksList.Count - 5} more");
+            }
         }
 
         // Tags
@@ -606,51 +563,67 @@ public sealed class ObsidianAnalysisService : IObsidianAnalysisService
     {
         var alerts = new List<string>();
 
-        // === METRICS-BASED ALERTS ===
+        AddHigherIsBetter(alerts, "Energy", note.Energy);
+        AddHigherIsBetter(alerts, "Motivation", note.Motivation);
+        AddHigherIsBetter(alerts, "Life satisfaction", note.LifeSatisfaction);
+        AddHigherIsBetter(alerts, "Optimism", note.Optimism);
+        AddHigherIsBetter(alerts, "Self esteem", note.SelfEsteem);
+        AddHigherIsBetter(alerts, "Presence", note.Presence);
 
-        // Check for low energy/motivation (concerning)
-        if (note.Energy.HasValue && note.Energy <= MetricThresholds.LowEnergy)
-            alerts.Add($"Yesterday's energy was low ({note.Energy}/10) - consider taking it easy today");
+        AddLowerIsBetter(alerts, "Stress", note.Stress);
+        AddLowerIsBetter(alerts, "Irritability", note.Irritability);
+        AddLowerIsBetter(alerts, "Obsession", note.Obsession);
 
-        if (note.Motivation.HasValue && note.Motivation <= MetricThresholds.LowMotivation)
-            alerts.Add($"Yesterday's motivation was low ({note.Motivation}/10) - be gentle with yourself");
+        if (note.BodyCount.HasValue && note.BodyCount > 0)
+            alerts.Add($"Body activities: {note.BodyCount}");
 
-        if (note.LifeSatisfaction.HasValue && note.LifeSatisfaction <= MetricThresholds.LowLifeSatisfaction)
-            alerts.Add($"Yesterday's life satisfaction was low ({note.LifeSatisfaction}/10)");
+        if (note.SoulCount.HasValue && note.SoulCount > 0)
+            alerts.Add($"Soul activities: {note.SoulCount}");
 
-        // Check for high stress (concerning)
-        if (note.Stress.HasValue && note.Stress >= MetricThresholds.HighStress)
-            alerts.Add($"Yesterday's stress was elevated ({note.Stress}/10) - prioritize self-care");
+        if (note.MeditationMinutes.HasValue && note.MeditationMinutes > 0)
+            alerts.Add($"Meditation: {note.MeditationMinutes} min");
 
-        // Check for high energy/motivation (positive)
-        if (note.Energy.HasValue && note.Energy >= MetricThresholds.HighEnergy)
-            alerts.Add($"Yesterday's energy was high ({note.Energy}/10) - great momentum!");
+        if (note.IndulgingCount.HasValue && note.IndulgingCount > 0)
+            alerts.Add($"Indulging count: {note.IndulgingCount}");
 
-        if (note.Motivation.HasValue && note.Motivation >= MetricThresholds.HighMotivation)
-            alerts.Add($"Yesterday's motivation was high ({note.Motivation}/10) - keep it up!");
-
-        // === HABIT-BASED ALERTS ===
-
-        // Body activities (positive feedback for high activity)
-        if (note.BodyCount.HasValue && note.BodyCount >= 3)
-            alerts.Add($"Great physical activity yesterday ({note.BodyCount} body activities) - keep moving!");
-
-        // Soul activities (positive feedback)
-        if (note.SoulCount.HasValue && note.SoulCount >= 3)
-            alerts.Add($"Good soul nourishment yesterday ({note.SoulCount} soul activities)!");
-
-        // Meditation (positive feedback)
-        if (note.MeditationMinutes.HasValue && note.MeditationMinutes >= 15)
-            alerts.Add($"Nice meditation practice yesterday ({note.MeditationMinutes} min)!");
-
-        // Indulging (gentle suggestion if high)
-        if (note.IndulgingCount.HasValue && note.IndulgingCount >= 3)
-            alerts.Add($"Noticed some indulging yesterday ({note.IndulgingCount}) - maybe balance it out today?");
-
-        // Areas (life areas maintenance)
-        if (note.AreasCount.HasValue && note.AreasCount >= 3)
-            alerts.Add($"Good work on life areas yesterday ({note.AreasCount} activities)!");
+        if (note.AreasCount.HasValue && note.AreasCount > 0)
+            alerts.Add($"Life areas touched: {note.AreasCount}");
 
         return alerts;
+    }
+
+    private static void AddHigherIsBetter(List<string> alerts, string name, int? value)
+    {
+        if (!value.HasValue)
+        {
+            return;
+        }
+
+        var label = value.Value switch
+        {
+            >= 8 => "high",
+            >= 7 => "solid",
+            >= 5 => "middle range",
+            _ => "low"
+        };
+
+        alerts.Add($"{name}: {value}/10 ({label}; higher is better)");
+    }
+
+    private static void AddLowerIsBetter(List<string> alerts, string name, int? value)
+    {
+        if (!value.HasValue)
+        {
+            return;
+        }
+
+        var label = value.Value switch
+        {
+            <= 3 => "OK/low",
+            <= 6 => "moderate",
+            _ => "elevated"
+        };
+
+        alerts.Add($"{name}: {value}/10 ({label}; lower is better)");
     }
 }

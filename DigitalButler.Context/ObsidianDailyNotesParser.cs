@@ -28,6 +28,10 @@ public static class ObsidianDailyNotesParser
         @"```tasks[\s\S]*?```",
         RegexOptions.Compiled);
 
+    private static readonly Regex MarkdownListMarkerRegex = new(
+        @"^\s*[-*+]\s*(?:\[[^\]]+\]\s*)?",
+        RegexOptions.Compiled);
+
     private static readonly IDeserializer YamlDeserializer = new DeserializerBuilder()
         .WithNamingConvention(HyphenatedNamingConvention.Instance)
         .IgnoreUnmatchedProperties()
@@ -245,7 +249,7 @@ public static class ObsidianDailyNotesParser
                 cleanJournal = cleanJournal[..8000];
             }
 
-            note.Notes = string.IsNullOrWhiteSpace(cleanJournal) ? null : cleanJournal;
+            note.Notes = HasMeaningfulJournalText(cleanJournal) ? cleanJournal : null;
         }
     }
 
@@ -270,6 +274,31 @@ public static class ObsidianDailyNotesParser
         var section = body[startIndex..endIndex].Trim();
 
         return string.IsNullOrWhiteSpace(section) ? null : section;
+    }
+
+    private static bool HasMeaningfulJournalText(string text)
+    {
+        foreach (var rawLine in text.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = MarkdownListMarkerRegex.Replace(rawLine, "").Trim();
+            if (line.Any(IsMeaningfulJournalCharacter))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsMeaningfulJournalCharacter(char ch)
+    {
+        if (char.IsLetterOrDigit(ch))
+        {
+            return true;
+        }
+
+        var category = CharUnicodeInfo.GetUnicodeCategory(ch);
+        return category is UnicodeCategory.OtherSymbol or UnicodeCategory.CurrencySymbol or UnicodeCategory.MathSymbol;
     }
 
     public static bool TryParseDateFromFilename(string fileNameOrPath, out DateOnly date)

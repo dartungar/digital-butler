@@ -58,6 +58,8 @@ public class VaultIndexingResult
     public int NotesRemoved { get; set; }
     public int ChunksCreated { get; set; }
     public int ChunksRemoved { get; set; }
+    public int TasksIndexed { get; set; }
+    public int TasksRemoved { get; set; }
     public TimeSpan Duration { get; set; }
     public List<string> Errors { get; set; } = new();
 }

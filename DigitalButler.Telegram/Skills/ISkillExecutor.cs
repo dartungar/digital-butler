@@ -13,6 +13,8 @@ public interface ISummarySkillExecutor
 {
     Task<string> ExecuteAsync(bool weekly, string taskName, CancellationToken ct);
 
+    Task<string> ExecuteDailyForDateAsync(DateOnly date, string taskName, CancellationToken ct);
+
     /// <summary>
     /// Executes the summary skill with optional vault enrichment.
     /// </summary>

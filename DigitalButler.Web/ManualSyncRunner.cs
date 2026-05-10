@@ -48,7 +48,7 @@ public sealed class ManualSyncRunner : IManualSyncRunner
                 try
                 {
                     var result = await vaultIndexer.IndexVaultAsync(ct);
-                    messages.Add($"VaultSearch: indexed {result.NotesAdded} new, {result.NotesUpdated} updated, {result.ChunksCreated} chunks");
+                    messages.Add($"VaultSearch: indexed {result.NotesAdded} new, {result.NotesUpdated} updated, {result.ChunksCreated} chunks, {result.TasksIndexed} tasks");
                 }
                 catch (Exception ex)
                 {
