@@ -5,10 +5,7 @@
 
 <PageTitle>Motivation</PageTitle>
 
-<div class="content">
-    <h3 class="title is-3">Motivation</h3>
-    <p class="subtitle is-6">Configure the motivation skill for personalized motivational messages.</p>
-</div>
+<PageHeader Title="Motivation" Subtitle="Configure the motivation skill for personalized motivational messages." Eyebrow="Skill" />
 
 <div class="box">
     <div class="content">
@@ -18,7 +15,7 @@
 
     @if (_skillConfig is null)
     {
-        <p>Loading...</p>
+        <div class="loading-state">Loading skill configuration...</div>
     }
     else
     {
@@ -33,10 +30,10 @@
 
             <div class="field">
                 <label class="label">Context Sources</label>
-                <div class="control">
+                <div class="control source-chip-row">
                     @foreach (var source in Enum.GetValues<ContextSource>())
                     {
-                        <label class="checkbox" style="display: block; margin-bottom: 0.5rem;">
+                        <label class="checkbox source-chip">
                             <input type="checkbox"
                                    checked="@IsSourceEnabled(source)"
                                    @onchange="(e) => SetSourceEnabled(source, (bool)(e.Value ?? false))" />

@@ -4,10 +4,7 @@
 
 <PageTitle>Calendar Event</PageTitle>
 
-<div class="content">
-    <h3 class="title is-3">Calendar Event</h3>
-    <p class="subtitle is-6">Configure the calendar event skill for creating events from natural language.</p>
-</div>
+<PageHeader Title="Calendar Event" Subtitle="Configure the calendar event skill for creating events from natural language." Eyebrow="Skill" />
 
 <div class="box">
     <div class="content">
@@ -17,7 +14,7 @@
 
     @if (_skillConfig is null)
     {
-        <p>Loading...</p>
+        <div class="loading-state">Loading skill configuration...</div>
     }
     else
     {

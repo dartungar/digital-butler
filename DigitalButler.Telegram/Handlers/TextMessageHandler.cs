@@ -138,6 +138,12 @@ public sealed class TextMessageHandler : ITextMessageHandler
             return;
         }
 
+        if (text.StartsWith("/tomorrow", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleTomorrowSummaryAsync(bot, chatId, ct);
+            return;
+        }
+
         if (text.StartsWith("/weekly", StringComparison.OrdinalIgnoreCase))
         {
             await HandleSummaryAsync(bot, chatId, weekly: true, ct);
@@ -236,6 +242,29 @@ public sealed class TextMessageHandler : ITextMessageHandler
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to generate summary");
+            await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), ct);
+        }
+    }
+
+    private async Task HandleTomorrowSummaryAsync(ITelegramBotClient bot, long chatId, CancellationToken ct)
+    {
+        await SendWithKeyboardAsync(bot, chatId, "Generating tomorrow summary...", ct);
+        try
+        {
+            var tomorrow = await GetLocalDateOffsetAsync(daysOffset: 1, ct);
+            var summary = await _summaryExecutor.ExecuteDailyForDateAsync(tomorrow, "on-demand-daily", ct);
+            if (string.IsNullOrWhiteSpace(summary)) summary = "No summary available.";
+
+            await SendWithMarkdownFallbackAsync(bot, chatId, TruncateForTelegram(summary),
+                KeyboardFactory.BuildTomorrowSummaryRefreshKeyboard(), ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Host shutting down
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to generate tomorrow summary");
             await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), ct);
         }
     }
@@ -642,6 +671,13 @@ public sealed class TextMessageHandler : ITextMessageHandler
     private static bool ContainsAny(string text, params string[] keywords)
     {
         return keywords.Any(keyword => text.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task<DateOnly> GetLocalDateOffsetAsync(int daysOffset, CancellationToken ct)
+    {
+        var tz = await _timeZoneProvider.GetTimeZoneInfoAsync(ct);
+        var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
+        return DateOnly.FromDateTime(localNow.DateTime).AddDays(daysOffset);
     }
 
     private static Task SendWithKeyboardAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)

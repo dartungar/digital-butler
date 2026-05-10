@@ -7,13 +7,10 @@
 
 <PageTitle>AI Settings</PageTitle>
 
-<div class="content">
-    <h3 class="title is-3">AI Settings Per Task</h3>
-    <p class="subtitle is-6">Leave values empty to use env defaults.</p>
-</div>
+<PageHeader Title="AI Settings Per Task" Subtitle="Override provider, model, or API key per Butler task. Empty values fall back to environment defaults." Eyebrow="Settings" />
 @if (_settings is null)
 {
-    <p>Loading...</p>
+    <div class="loading-state">Loading AI settings...</div>
 }
 else
 {

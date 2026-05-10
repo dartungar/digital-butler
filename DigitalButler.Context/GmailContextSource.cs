@@ -10,8 +10,11 @@ using DigitalButler.Common;
 
 namespace DigitalButler.Context;
 
-public sealed class GmailContextSource : IContextSource, IStaleContextCleanupSource
+public sealed class GmailContextSource : IContextSource, ICategorizedStaleContextCleanupSource
 {
+    private const string EmailCategory = "Email";
+    private const string UnreadEmailCategory = "Email (Unread)";
+
     private readonly GmailOptions _options;
     private readonly ILogger<GmailContextSource> _logger;
     private bool _canCleanStaleItems;
@@ -28,6 +31,7 @@ public sealed class GmailContextSource : IContextSource, IStaleContextCleanupSou
     public bool CanCleanStaleItems => _canCleanStaleItems;
     public DateTimeOffset? CleanupWindowStartUtc => _cleanupWindowStartUtc;
     public DateTimeOffset? CleanupWindowEndUtc => _cleanupWindowEndUtc;
+    public IReadOnlyCollection<string?> CleanupCategories { get; } = new[] { EmailCategory, UnreadEmailCategory };
 
     public async Task<IReadOnlyList<ContextItem>> FetchAsync(CancellationToken ct = default)
     {
@@ -214,7 +218,7 @@ public sealed class GmailContextSource : IContextSource, IStaleContextCleanupSou
                 Body = Truncate(body.ToString().Trim(), 4000),
                 RelevantDate = dateUtc,
                 IsTimeless = false,
-                Category = account.UnreadOnly ? "Email (Unread)" : "Email",
+                Category = account.UnreadOnly ? UnreadEmailCategory : EmailCategory,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow,
             });

@@ -6,10 +6,7 @@
 
 <PageTitle>Google Calendar</PageTitle>
 
-<div class="content">
-    <h3 class="title is-3">Google Calendar</h3>
-    <p class="subtitle is-6">Configure iCal feeds, sync schedule, and summarization instructions.</p>
-</div>
+<PageHeader Title="Google Calendar" Subtitle="Configure iCal feeds, sync schedule, and summarization instructions." Eyebrow="Context" />
 
 <div class="box">
     <div class="content">
@@ -19,7 +16,7 @@
 
     @if (_feeds is null)
     {
-        <p>Loading...</p>
+        <div class="loading-state">Loading calendar feeds...</div>
     }
     else
     {

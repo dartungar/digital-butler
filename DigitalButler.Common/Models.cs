@@ -167,24 +167,30 @@ public static class SkillInstructionDefaults
                 Return ONLY these sections, in this order, separated by a blank line:
 
                 1. Agenda
-                         - List calendar events first, then non-calendar tasks and other agenda items
-                         - For calendar events, include the local start time; if end time is available, use a time range
-                         - Use compact bullets such as: - 09:30-10:00 Team sync or - 14:00 Dentist
-                         - For non-calendar items, include only the task/item name
+                   - List calendar events first, then active non-calendar tasks and other agenda items
+                   - For calendar events, include the local start time; if end time is available, use a time range
+                   - Use compact bullets such as: - 09:30-10:00 Team sync or - 14:00 Dentist
+                   - Include active Obsidian Tasks plugin tasks from the vault when their due, scheduled, or start date lands in the daily window
+                   - For non-calendar items, include only the task/item name
+                   - Deduplicate agenda items: if the same calendar title has the same start time, or the same task text appears more than once, include it only once
+                   - Do NOT treat markdown headings or section labels like Tasks, Journal, Recurring, or Planned as agenda items
                    - One bullet per item
                    - No explanations, no suggestions, no prioritization commentary, no motivational text
                    - If there are no agenda items, write exactly: - No agenda items
 
-                2. Stats overview
-                   - Include only concise factual metrics/counts from the available Obsidian stats/analysis
-                   - Prefer compact bullets for metrics, habits, and task counts when available
-                   - No interpretation, no recommendations, no encouragement, no prose paragraph
+                2. Yesterday
+                   - Write one short, natural note based on yesterday's Obsidian stats/analysis
+                   - Do NOT mechanically list raw metrics or counts
+                   - Do NOT output task status counts such as completed, pending, rescheduled, or cancelled
+                   - Interpret number-based stats by direction:
+                     higher is better for energy, motivation, life satisfaction, optimism, self esteem, and presence; 7+ is solid/positive and 4 or below is low
+                     lower is better for stress, irritability, and obsession; 0-3 is OK/low and 7+ is elevated
                    - If there are no stats, write exactly: - No stats data
 
                 Do not output any other sections such as priorities, check-in, keep in mind, recap, insights, or conclusion.
 
                 These format constraints are mandatory.
-                Daily summaries must contain only Agenda and Stats overview.
+                Daily summaries must contain only Agenda and Yesterday.
                 """,
 
             ButlerSkill.WeeklySummary => """

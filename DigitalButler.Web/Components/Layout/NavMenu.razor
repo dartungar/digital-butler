@@ -1,7 +1,13 @@
 @using Microsoft.AspNetCore.Components.Routing
 
-<div class="top-row">
-    <a class="brand" href="">DigitalButler</a>
+<div class="top-row nav-brand-row">
+    <a class="brand" href="">
+        <span class="brand-mark">DB</span>
+        <span>
+            <span class="brand-title">DigitalButler</span>
+            <span class="brand-subtitle">Context control</span>
+        </span>
+    </a>
 </div>
 
 <input type="checkbox" title="Navigation menu" class="navbar-toggler"/>
@@ -10,32 +16,32 @@
     <aside class="menu">
         <p class="menu-label">Admin</p>
         <ul class="menu-list">
-            <li><NavLink href="/" Match="NavLinkMatch.All" ActiveClass="is-active">Dashboard</NavLink></li>
+            <li><NavLink href="/" Match="NavLinkMatch.All" ActiveClass="is-active"><UiIcon Name="home" />Dashboard</NavLink></li>
         </ul>
 
         <p class="menu-label">Context</p>
         <ul class="menu-list">
-            <li><NavLink href="/context/all" ActiveClass="is-active">All Context</NavLink></li>
-            <li><NavLink href="/context/sync" ActiveClass="is-active">Sync Logs</NavLink></li>
-            <li><NavLink href="/context/obsidian" ActiveClass="is-active">Daily Notes</NavLink></li>
-            <li><NavLink href="/context/obsidian-vault" ActiveClass="is-active">Vault Search</NavLink></li>
-            <li><NavLink href="/context/google-calendar" ActiveClass="is-active">Google Calendar</NavLink></li>
-            <li><NavLink href="/context/gmail-settings" ActiveClass="is-active">Gmail</NavLink></li>
+            <li><NavLink href="/context/all" ActiveClass="is-active"><UiIcon Name="database" />All Context</NavLink></li>
+            <li><NavLink href="/context/sync" ActiveClass="is-active"><UiIcon Name="sync" />Sync Logs</NavLink></li>
+            <li><NavLink href="/context/obsidian" ActiveClass="is-active"><UiIcon Name="note" />Daily Notes</NavLink></li>
+            <li><NavLink href="/context/obsidian-vault" ActiveClass="is-active"><UiIcon Name="search" />Vault Search</NavLink></li>
+            <li><NavLink href="/context/google-calendar" ActiveClass="is-active"><UiIcon Name="calendar" />Google Calendar</NavLink></li>
+            <li><NavLink href="/context/gmail-settings" ActiveClass="is-active"><UiIcon Name="mail" />Gmail</NavLink></li>
         </ul>
 
         <p class="menu-label">Skills</p>
         <ul class="menu-list">
-            <li><NavLink href="/skills/daily-summary" ActiveClass="is-active">Daily Summary</NavLink></li>
-            <li><NavLink href="/skills/weekly-summary" ActiveClass="is-active">Weekly Summary</NavLink></li>
-            <li><NavLink href="/skills/motivation" ActiveClass="is-active">Motivation</NavLink></li>
-            <li><NavLink href="/skills/activities" ActiveClass="is-active">Activities</NavLink></li>
-            <li><NavLink href="/skills/calendar-event" ActiveClass="is-active">Calendar Event</NavLink></li>
-            <li><NavLink href="/skills/add-to-obsidian" ActiveClass="is-active">Add to Obsidian</NavLink></li>
+            <li><NavLink href="/skills/daily-summary" ActiveClass="is-active"><UiIcon Name="spark" />Daily Summary</NavLink></li>
+            <li><NavLink href="/skills/weekly-summary" ActiveClass="is-active"><UiIcon Name="spark" />Weekly Summary</NavLink></li>
+            <li><NavLink href="/skills/motivation" ActiveClass="is-active"><UiIcon Name="spark" />Motivation</NavLink></li>
+            <li><NavLink href="/skills/activities" ActiveClass="is-active"><UiIcon Name="activity" />Activities</NavLink></li>
+            <li><NavLink href="/skills/calendar-event" ActiveClass="is-active"><UiIcon Name="calendar" />Calendar Event</NavLink></li>
+            <li><NavLink href="/skills/add-to-obsidian" ActiveClass="is-active"><UiIcon Name="plus-note" />Add to Obsidian</NavLink></li>
         </ul>
 
         <p class="menu-label">Settings</p>
         <ul class="menu-list">
-            <li><NavLink href="/ai-settings" ActiveClass="is-active">AI Settings</NavLink></li>
+            <li><NavLink href="/ai-settings" ActiveClass="is-active"><UiIcon Name="settings" />AI Settings</NavLink></li>
         </ul>
     </aside>
 </div>

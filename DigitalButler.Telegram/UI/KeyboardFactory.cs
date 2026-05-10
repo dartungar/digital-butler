@@ -8,7 +8,7 @@ public static class KeyboardFactory
     {
         return new ReplyKeyboardMarkup(new[]
         {
-            new[] { new KeyboardButton("/daily"), new KeyboardButton("/weekly") },
+            new[] { new KeyboardButton("/daily"), new KeyboardButton("/tomorrow"), new KeyboardButton("/weekly") },
             new[] { new KeyboardButton("/motivation"), new KeyboardButton("/activities") },
             new[] { new KeyboardButton("/search"), new KeyboardButton("/addnote") },
             new[] { new KeyboardButton("/sync") }
@@ -25,6 +25,10 @@ public static class KeyboardFactory
             new[]
             {
                 InlineKeyboardButton.WithCallbackData("Daily Summary", "help:daily"),
+                InlineKeyboardButton.WithCallbackData("Tomorrow", "help:tomorrow")
+            },
+            new[]
+            {
                 InlineKeyboardButton.WithCallbackData("Weekly Summary", "help:weekly")
             },
             new[]
@@ -47,6 +51,7 @@ public static class KeyboardFactory
             new[]
             {
                 InlineKeyboardButton.WithCallbackData("Daily", "summary:daily"),
+                InlineKeyboardButton.WithCallbackData("Tomorrow", "summary:tomorrow"),
                 InlineKeyboardButton.WithCallbackData("Weekly", "summary:weekly")
             }
         });
@@ -60,6 +65,17 @@ public static class KeyboardFactory
             new[]
             {
                 InlineKeyboardButton.WithCallbackData("Refresh", refreshData)
+            }
+        });
+    }
+
+    public static InlineKeyboardMarkup BuildTomorrowSummaryRefreshKeyboard()
+    {
+        return new InlineKeyboardMarkup(new[]
+        {
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("Refresh", "summary:refresh_tomorrow")
             }
         });
     }

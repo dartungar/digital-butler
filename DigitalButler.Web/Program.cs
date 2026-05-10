@@ -8,6 +8,7 @@ using DigitalButler.Web.Components;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Antiforgery;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Microsoft.Extensions.Options;
@@ -230,6 +231,7 @@ builder.Services.AddScoped<IObsidianAnalysisService, ObsidianAnalysisService>();
 builder.Services.AddHttpClient<IEmbeddingService, OpenAiEmbeddingService>();
 builder.Services.AddScoped<INoteChunker, NoteChunker>();
 builder.Services.AddScoped<IDateQueryTranslator, DateQueryTranslator>();
+builder.Services.AddScoped<IObsidianTaskContextIndexer, ObsidianTaskContextIndexer>();
 builder.Services.AddScoped<IVaultIndexer, VaultIndexer>();
 builder.Services.AddScoped<IVaultSearchService, VaultSearchService>();
 builder.Services.AddScoped<IVaultEnrichmentService, VaultEnrichmentService>();
@@ -308,12 +310,18 @@ app.MapPost("/login", async (HttpContext http) =>
         return Results.Redirect("/login?error=1");
 }).AllowAnonymous();
 
-app.MapGet("/login", (HttpContext http) =>
+app.MapGet("/login", (HttpContext http, IAntiforgery antiforgery, IWebHostEnvironment environment) =>
 {
         var showError = http.Request.Query.ContainsKey("error");
         var errorHtml = showError
                 ? "<div class=\"notification is-danger is-light\">Invalid username or password.</div>"
                 : string.Empty;
+        var tokens = antiforgery.GetAndStoreTokens(http);
+        var antiforgeryFieldName = HtmlEncoder.Default.Encode(tokens.FormFieldName);
+        var antiforgeryToken = HtmlEncoder.Default.Encode(tokens.RequestToken ?? string.Empty);
+        var bulmaCssHref = AppendStaticAssetVersion(environment, "lib/bulma/bulma.min.css");
+        var appCssHref = AppendStaticAssetVersion(environment, "app.css");
+        var scopedCssHref = AppendStaticAssetVersion(environment, "DigitalButler.Web.styles.css");
 
         var html = $$"""
 <!doctype html>
@@ -322,22 +330,27 @@ app.MapGet("/login", (HttpContext http) =>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Login</title>
-    <link rel="stylesheet" href="/lib/bulma/bulma.min.css" />
-    <link rel="stylesheet" href="/app.css" />
-    <link rel="stylesheet" href="/DigitalButler.Web.styles.css" />
+    <link rel="stylesheet" href="{{bulmaCssHref}}" />
+    <link rel="stylesheet" href="{{appCssHref}}" />
+    <link rel="stylesheet" href="{{scopedCssHref}}" />
 </head>
 <body>
-    <section class="section">
-        <div class="container" style="max-width: 520px;">
-            <div class="content">
-                <h1 class="title is-3">Login</h1>
-                <p class="subtitle is-6">Sign in to continue.</p>
+    <main class="auth-shell">
+        <section class="auth-panel">
+            <div class="auth-brand">
+                <span class="auth-brand__mark">DB</span>
+                <div>
+                    <h1 class="page-heading__title">DigitalButler</h1>
+                    <p class="page-heading__subtitle">Sign in to continue.</p>
+                </div>
             </div>
 
             {{errorHtml}}
 
-            <div class="box">
+            <div class="auth-card">
                 <form method="post" action="/login">
+                    <input name="{{antiforgeryFieldName}}" type="hidden" value="{{antiforgeryToken}}" />
+
                     <div class="field">
                         <label class="label" for="username">Username</label>
                         <div class="control">
@@ -353,12 +366,12 @@ app.MapGet("/login", (HttpContext http) =>
                     </div>
 
                     <div class="buttons">
-                        <button class="button is-primary" type="submit">Login</button>
+                        <button class="button is-primary is-fullwidth" type="submit">Login</button>
                     </div>
                 </form>
             </div>
-        </div>
-    </section>
+        </section>
+    </main>
 </body>
 </html>
 """;
@@ -417,6 +430,14 @@ static bool VerifyPlainPassword(string password, string expectedPassword)
     var actualBytes = SHA256.HashData(Encoding.UTF8.GetBytes(password));
     var expectedBytes = SHA256.HashData(Encoding.UTF8.GetBytes(expectedPassword));
     return CryptographicOperations.FixedTimeEquals(actualBytes, expectedBytes);
+}
+
+static string AppendStaticAssetVersion(IWebHostEnvironment environment, string assetPath)
+{
+    var normalized = assetPath.TrimStart('/');
+    var file = environment.WebRootFileProvider.GetFileInfo(normalized);
+    var version = file.Exists ? file.LastModified.ToUnixTimeSeconds().ToString() : DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+    return "/" + normalized + "?v=" + version;
 }
 
 static bool FixedTimeEquals(string actual, string expected)

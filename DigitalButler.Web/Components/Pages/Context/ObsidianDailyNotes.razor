@@ -5,14 +5,11 @@
 
 <PageTitle>Obsidian Daily Notes</PageTitle>
 
-<div class="content">
-    <h3 class="title is-3">Obsidian Daily Notes</h3>
-    <p class="subtitle is-6">View synced daily notes from your Obsidian vault.</p>
-</div>
+<PageHeader Title="Obsidian Daily Notes" Subtitle="View synced daily notes from your Obsidian vault." Eyebrow="Context" />
 
 @if (_notes is null)
 {
-    <p>Loading...</p>
+    <div class="loading-state">Loading daily notes...</div>
 }
 else if (_notes.Count == 0)
 {

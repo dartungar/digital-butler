@@ -1,21 +1,24 @@
 ﻿@inherits LayoutComponentBase
 
-<div class="page">
-    <div class="sidebar">
+<div class="page app-shell">
+    <div class="sidebar app-sidebar">
         <NavMenu/>
     </div>
 
-    <main>
-        <div class="top-row">
-            <div class="level is-mobile" style="width: 100%;">
-                <div class="level-left"></div>
-                <div class="level-right">
-                </div>
+    <main class="app-main">
+        <div class="top-row app-topbar">
+            <div class="topbar-copy">
+                <span class="topbar-kicker">Private console</span>
+                <span class="topbar-title">DigitalButler workspace</span>
+            </div>
+            <div class="topbar-status">
+                <span class="status-dot"></span>
+                <span>Online</span>
             </div>
         </div>
 
-        <section class="section">
-            <div class="container">
+        <section class="section app-content">
+            <div class="container app-container">
                 @Body
             </div>
         </section>
@@ -25,5 +28,5 @@
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.
     <a href="." class="reload">Reload</a>
-    <span class="dismiss">🗙</span>
+    <span class="dismiss">x</span>
 </div>

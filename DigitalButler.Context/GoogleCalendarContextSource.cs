@@ -11,8 +11,10 @@ using DigitalButler.Data.Repositories;
 
 namespace DigitalButler.Context;
 
-public sealed class GoogleCalendarContextSource : IContextSource, IStaleContextCleanupSource
+public sealed class GoogleCalendarContextSource : IContextSource, ICategorizedStaleContextCleanupSource
 {
+    private const string CalendarCategory = "Calendar";
+
     private readonly HttpClient _httpClient;
     private readonly GoogleCalendarOptions _options;
     private readonly ILogger<GoogleCalendarContextSource> _logger;
@@ -35,6 +37,7 @@ public sealed class GoogleCalendarContextSource : IContextSource, IStaleContextC
     public bool CanCleanStaleItems => _canCleanStaleItems;
     public DateTimeOffset? CleanupWindowStartUtc => _cleanupWindowStartUtc;
     public DateTimeOffset? CleanupWindowEndUtc => _cleanupWindowEndUtc;
+    public IReadOnlyCollection<string?> CleanupCategories { get; } = new[] { CalendarCategory };
 
     public async Task<IReadOnlyList<ContextItem>> FetchAsync(CancellationToken ct = default)
     {
@@ -129,7 +132,7 @@ public sealed class GoogleCalendarContextSource : IContextSource, IStaleContextC
                         Body = BuildBody(feed.Name, ev, startUtc, occEndUtc, tz),
                         RelevantDate = new DateTimeOffset(startUtc, TimeSpan.Zero),
                         IsTimeless = false,
-                        Category = "Calendar",
+                        Category = CalendarCategory,
                         CreatedAt = DateTimeOffset.UtcNow,
                         UpdatedAt = DateTimeOffset.UtcNow,
                     });

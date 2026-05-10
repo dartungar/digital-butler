@@ -8,10 +8,7 @@
 
 <PageTitle>Daily Summary</PageTitle>
 
-<div class="content">
-    <h3 class="title is-3">Daily Summary</h3>
-    <p class="subtitle is-6">Configure the daily summary skill.</p>
-</div>
+<PageHeader Title="Daily Summary" Subtitle="Configure the daily summary prompt, context sources, schedule, and AI overrides." Eyebrow="Skill" />
 
 <div class="box">
     <div class="content">
@@ -21,7 +18,7 @@
 
     @if (_skillConfig is null)
     {
-        <p>Loading...</p>
+        <div class="loading-state">Loading skill configuration...</div>
     }
     else
     {
@@ -37,10 +34,10 @@
 
             <div class="field">
                 <label class="label">Context Sources</label>
-                <div class="control">
+                <div class="control source-chip-row">
                     @foreach (var source in Enum.GetValues<ContextSource>())
                     {
-                        <label class="checkbox" style="display: block; margin-bottom: 0.5rem;">
+                        <label class="checkbox source-chip">
                             <input type="checkbox"
                                    checked="@IsSourceEnabled(source)"
                                    @onchange="(e) => SetSourceEnabled(source, (bool)(e.Value ?? false))" />
