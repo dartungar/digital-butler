@@ -30,6 +30,7 @@ public class VaultSearchService : IVaultSearchService
     private readonly VaultSearchRepository _repo;
     private readonly IEmbeddingService _embeddingService;
     private readonly IDateQueryTranslator _dateTranslator;
+    private readonly ITimeZoneProvider _timeZoneProvider;
     private readonly VaultSearchOptions _options;
     private readonly ILogger<VaultSearchService> _logger;
 
@@ -37,12 +38,14 @@ public class VaultSearchService : IVaultSearchService
         VaultSearchRepository repo,
         IEmbeddingService embeddingService,
         IDateQueryTranslator dateTranslator,
+        ITimeZoneProvider timeZoneProvider,
         IOptions<VaultSearchOptions> options,
         ILogger<VaultSearchService> logger)
     {
         _repo = repo;
         _embeddingService = embeddingService;
         _dateTranslator = dateTranslator;
+        _timeZoneProvider = timeZoneProvider;
         _options = options.Value;
         _logger = logger;
     }
@@ -62,8 +65,11 @@ public class VaultSearchService : IVaultSearchService
         var effectiveTopK = topK ?? _options.TopK;
         var effectiveMinScore = minScore ?? _options.MinScore;
 
+        var tz = await _timeZoneProvider.GetTimeZoneInfoAsync(ct);
+        var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
+
         // Translate date references in the query
-        var translatedQuery = _dateTranslator.TranslateQuery(query, DateTimeOffset.Now);
+        var translatedQuery = _dateTranslator.TranslateQuery(query, localNow);
 
         _logger.LogDebug(
             "Searching vault: original='{Query}', dateTerms=[{DateTerms}], topK={TopK}, minScore={MinScore}",

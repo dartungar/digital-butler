@@ -264,6 +264,11 @@ public interface IContextSource
     Task<IReadOnlyList<ContextItem>> FetchAsync(CancellationToken ct = default);
 }
 
+public interface ITimeZoneProvider
+{
+    Task<TimeZoneInfo> GetTimeZoneInfoAsync(CancellationToken ct = default);
+}
+
 public interface IContextUpdater
 {
     ContextSource Source { get; }

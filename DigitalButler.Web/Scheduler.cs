@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using DigitalButler.Context;
 using DigitalButler.Common;
 using DigitalButler.Data.Repositories;
@@ -12,6 +13,10 @@ namespace DigitalButler.Web;
 
 public class SchedulerService : BackgroundService
 {
+    private const string VaultIndexLastRunKey = "scheduler.vaultIndex.lastRun";
+    private static readonly TimeSpan DailySummaryCatchUpWindow = TimeSpan.FromHours(12);
+    private static readonly TimeSpan WeeklySummaryCatchUpWindow = TimeSpan.FromDays(1);
+
     private readonly IServiceProvider _services;
     private readonly ILogger<SchedulerService> _logger;
     private readonly ITelegramBotClient? _bot;
@@ -82,11 +87,6 @@ public class SchedulerService : BackgroundService
     private async Task TickAsync(CancellationToken ct)
     {
         using var scope = _services.CreateScope();
-        var contextService = scope.ServiceProvider.GetRequiredService<ContextService>();
-        var instructionService = scope.ServiceProvider.GetRequiredService<InstructionService>();
-        var skillInstructionService = scope.ServiceProvider.GetRequiredService<SkillInstructionService>();
-        var summarizer = scope.ServiceProvider.GetRequiredService<ISummarizationService>();
-        var aiContext = scope.ServiceProvider.GetRequiredService<IAiContextAugmenter>();
         var nowUtc = DateTimeOffset.UtcNow;
         var tzService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
         var tz = await tzService.GetTimeZoneInfoAsync(ct);
@@ -94,27 +94,28 @@ public class SchedulerService : BackgroundService
         var chatId = _config["Telegram:ChatId"];
         var schedules = scope.ServiceProvider.GetRequiredService<ScheduleRepository>();
         var updaterRegistry = scope.ServiceProvider.GetRequiredService<IContextUpdaterRegistry>();
+        var appSettings = scope.ServiceProvider.GetRequiredService<AppSettingsRepository>();
 
         // Run module updates based on interval (parse CronOrInterval as minutes interval)
         var logRepo = scope.ServiceProvider.GetRequiredService<ContextUpdateLogRepository>();
         foreach (var schedule in await schedules.GetEnabledUpdateSchedulesAsync(ct))
         {
-            var intervalMinutes = ParseIntervalMinutes(schedule.CronOrInterval);
-            if (intervalMinutes > 0 && nowUtc.Minute % intervalMinutes == 0)
+            if (await IsUpdateScheduleDueAsync(schedule, nowUtc, appSettings, ct))
             {
                 var updater = updaterRegistry.GetUpdater(schedule.Source);
                 if (updater != null)
                 {
                     _logger.LogInformation("Starting scheduled update for {Source}", schedule.Source);
                     await RunUpdaterWithLoggingAsync(updater, logRepo, "scheduled", ct);
+                    await MarkRunAsync(UpdateScheduleLastRunKey(schedule), nowUtc, appSettings, ct);
                 }
             }
         }
 
-        // Run vault indexing every 30 minutes (at :00 and :30)
-        if (nowUtc.Minute % 30 == 0)
+        if (await IsIntervalDueAsync(VaultIndexLastRunKey, TimeSpan.FromMinutes(30), nowUtc, appSettings, ct))
         {
             await RunVaultIndexingWithLoggingAsync(scope.ServiceProvider, logRepo, "scheduled", ct);
+            await MarkRunAsync(VaultIndexLastRunKey, nowUtc, appSettings, ct);
         }
 
         // Daily summaries
@@ -128,15 +129,19 @@ public class SchedulerService : BackgroundService
         }
         foreach (var sched in daily)
         {
-            if (sched.Time.Hour == localNow.Hour && sched.Time.Minute == localNow.Minute)
+            var due = await GetDueSummaryOccurrenceAsync(sched, localNow, nowUtc, tz, appSettings, ct);
+            if (due is not null)
             {
-                _logger.LogInformation("Daily summary schedule matched: {ScheduleTime} == {LocalNow:HH:mm}", sched.Time, localNow);
+                _logger.LogInformation("Daily summary schedule due: {ScheduledLocal}", due.ScheduledLocal);
                 try
                 {
                     // Run all syncs before sending daily summary
                     _logger.LogInformation("Running pre-summary sync for daily summary");
                     await RunPreSummarySyncAsync(scope.ServiceProvider, updaterRegistry, logRepo, ct);
-                    await SendSummaryAsync(scope.ServiceProvider, contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "daily-summary", chatId, ct);
+                    if (await SendSummaryAsync(scope.ServiceProvider, "daily-summary", chatId, ct))
+                    {
+                        await appSettings.UpsertAsync(due.SentKey, nowUtc.ToString("O"), ct);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -159,16 +164,19 @@ public class SchedulerService : BackgroundService
         }
         foreach (var sched in weekly)
         {
-            if (sched.DayOfWeek == localNow.DayOfWeek && sched.Time.Hour == localNow.Hour && sched.Time.Minute == localNow.Minute)
+            var due = await GetDueSummaryOccurrenceAsync(sched, localNow, nowUtc, tz, appSettings, ct);
+            if (due is not null)
             {
-                _logger.LogInformation("Weekly summary schedule matched: {DayOfWeek} {ScheduleTime} == {LocalDow} {LocalNow:HH:mm}",
-                    sched.DayOfWeek, sched.Time, localNow.DayOfWeek, localNow);
+                _logger.LogInformation("Weekly summary schedule due: {ScheduledLocal}", due.ScheduledLocal);
                 try
                 {
                     // Run all syncs before sending weekly summary
                     _logger.LogInformation("Running pre-summary sync for weekly summary");
                     await RunPreSummarySyncAsync(scope.ServiceProvider, updaterRegistry, logRepo, ct);
-                    await SendSummaryAsync(scope.ServiceProvider, contextService, instructionService, skillInstructionService, summarizer, aiContext, tz, "weekly-summary", chatId, ct);
+                    if (await SendSummaryAsync(scope.ServiceProvider, "weekly-summary", chatId, ct))
+                    {
+                        await appSettings.UpsertAsync(due.SentKey, nowUtc.ToString("O"), ct);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -182,32 +190,319 @@ public class SchedulerService : BackgroundService
         }
     }
 
-    /// <summary>
-    /// Parse CronOrInterval as interval in minutes. Supports:
-    /// - Plain number: "60" = every 60 minutes
-    /// - Cron-like: "0 */1 * * *" = extract interval from */N pattern, defaults to 60
-    /// </summary>
-    private static int ParseIntervalMinutes(string? cronOrInterval)
+    private async Task<bool> IsUpdateScheduleDueAsync(
+        ScheduleConfig schedule,
+        DateTimeOffset nowUtc,
+        AppSettingsRepository appSettings,
+        CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(cronOrInterval))
-            return 60; // Default: hourly
+        var key = UpdateScheduleLastRunKey(schedule);
+        var raw = schedule.CronOrInterval;
 
-        var trimmed = cronOrInterval.Trim();
+        if (TryParseInterval(raw, out var interval))
+        {
+            return await IsIntervalDueAsync(key, interval, nowUtc, appSettings, ct);
+        }
 
-        // Try plain integer first
-        if (int.TryParse(trimmed, out var plainMinutes) && plainMinutes > 0)
-            return plainMinutes;
+        if (CronExpression.TryParse(raw, out var cron))
+        {
+            var lastRun = await GetLastRunAsync(key, appSettings, ct);
+            if (lastRun is null)
+            {
+                return cron.IsMatch(TruncateToMinute(nowUtc).UtcDateTime);
+            }
 
-        // Try to extract from cron-like pattern "0 */N * * *" or similar
-        var match = System.Text.RegularExpressions.Regex.Match(trimmed, @"\*/(\d+)");
-        if (match.Success && int.TryParse(match.Groups[1].Value, out var cronInterval) && cronInterval > 0)
-            return cronInterval * 60; // Assume it's hours, convert to minutes
+            return cron.HasOccurrenceBetween(lastRun.Value, nowUtc);
+        }
 
-        // Default to hourly
-        return 60;
+        _logger.LogWarning("Unsupported update schedule '{Schedule}' for {Source}; falling back to hourly elapsed checks", raw, schedule.Source);
+        return await IsIntervalDueAsync(key, TimeSpan.FromHours(1), nowUtc, appSettings, ct);
     }
 
-    private async Task SendSummaryAsync(IServiceProvider serviceProvider, ContextService contextService, InstructionService instructionService, SkillInstructionService skillInstructionService, ISummarizationService summarizer, IAiContextAugmenter aiContext, TimeZoneInfo tz, string taskName, string? chatId, CancellationToken ct)
+    private static async Task<bool> IsIntervalDueAsync(
+        string key,
+        TimeSpan interval,
+        DateTimeOffset nowUtc,
+        AppSettingsRepository appSettings,
+        CancellationToken ct)
+    {
+        var lastRun = await GetLastRunAsync(key, appSettings, ct);
+        return lastRun is null || nowUtc - lastRun.Value >= interval;
+    }
+
+    private static async Task<DateTimeOffset?> GetLastRunAsync(string key, AppSettingsRepository appSettings, CancellationToken ct)
+    {
+        var raw = await appSettings.GetAsync(key, ct);
+        if (DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var value))
+        {
+            return value.ToUniversalTime();
+        }
+
+        return null;
+    }
+
+    private static Task MarkRunAsync(string key, DateTimeOffset nowUtc, AppSettingsRepository appSettings, CancellationToken ct)
+    {
+        return appSettings.UpsertAsync(key, nowUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), ct);
+    }
+
+    private static bool TryParseInterval(string? value, out TimeSpan interval)
+    {
+        interval = default;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            interval = TimeSpan.FromHours(1);
+            return true;
+        }
+
+        var trimmed = value.Trim();
+        if (int.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var minutes) && minutes > 0)
+        {
+            interval = TimeSpan.FromMinutes(minutes);
+            return true;
+        }
+
+        return false;
+    }
+
+    private async Task<SummaryOccurrence?> GetDueSummaryOccurrenceAsync(
+        SummarySchedule schedule,
+        DateTimeOffset localNow,
+        DateTimeOffset nowUtc,
+        TimeZoneInfo tz,
+        AppSettingsRepository appSettings,
+        CancellationToken ct)
+    {
+        var scheduledLocal = schedule.IsWeekly
+            ? GetMostRecentWeeklyScheduledLocal(schedule, localNow)
+            : GetMostRecentDailyScheduledLocal(schedule, localNow);
+
+        if (scheduledLocal is null)
+        {
+            return null;
+        }
+
+        var scheduledUtc = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(scheduledLocal.Value, tz), TimeSpan.Zero);
+        var catchUpWindow = schedule.IsWeekly ? WeeklySummaryCatchUpWindow : DailySummaryCatchUpWindow;
+        if (scheduledUtc > nowUtc || nowUtc - scheduledUtc > catchUpWindow)
+        {
+            return null;
+        }
+
+        var sentKey = SummarySentKey(schedule, scheduledLocal.Value);
+        var existing = await appSettings.GetAsync(sentKey, ct);
+        if (!string.IsNullOrWhiteSpace(existing))
+        {
+            return null;
+        }
+
+        return new SummaryOccurrence(scheduledLocal.Value, sentKey);
+    }
+
+    private static DateTime? GetMostRecentDailyScheduledLocal(SummarySchedule schedule, DateTimeOffset localNow)
+    {
+        var today = DateOnly.FromDateTime(localNow.DateTime);
+        var candidate = today.ToDateTime(schedule.Time);
+        if (candidate > localNow.DateTime)
+        {
+            candidate = candidate.AddDays(-1);
+        }
+
+        return candidate;
+    }
+
+    private static DateTime? GetMostRecentWeeklyScheduledLocal(SummarySchedule schedule, DateTimeOffset localNow)
+    {
+        if (schedule.DayOfWeek is null)
+        {
+            return null;
+        }
+
+        var today = DateOnly.FromDateTime(localNow.DateTime);
+        var daysBack = ((7 + (int)localNow.DayOfWeek - (int)schedule.DayOfWeek.Value) % 7);
+        var candidate = today.AddDays(-daysBack).ToDateTime(schedule.Time);
+        if (candidate > localNow.DateTime)
+        {
+            candidate = candidate.AddDays(-7);
+        }
+
+        return candidate;
+    }
+
+    private static string UpdateScheduleLastRunKey(ScheduleConfig schedule)
+        => $"scheduler.update.lastRun.{schedule.Source}.{schedule.Id:N}";
+
+    private static string SummarySentKey(SummarySchedule schedule, DateTime scheduledLocal)
+    {
+        var kind = schedule.IsWeekly ? "weekly" : "daily";
+        return $"scheduler.summary.sent.{kind}.{schedule.Id:N}.{scheduledLocal.ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture)}";
+    }
+
+    private static DateTimeOffset TruncateToMinute(DateTimeOffset value)
+    {
+        return new DateTimeOffset(value.Year, value.Month, value.Day, value.Hour, value.Minute, 0, value.Offset);
+    }
+
+    private sealed record SummaryOccurrence(DateTime ScheduledLocal, string SentKey);
+
+    private sealed class CronExpression
+    {
+        private readonly HashSet<int> _minutes;
+        private readonly HashSet<int> _hours;
+        private readonly HashSet<int> _days;
+        private readonly HashSet<int> _months;
+        private readonly HashSet<int> _daysOfWeek;
+
+        private CronExpression(
+            HashSet<int> minutes,
+            HashSet<int> hours,
+            HashSet<int> days,
+            HashSet<int> months,
+            HashSet<int> daysOfWeek)
+        {
+            _minutes = minutes;
+            _hours = hours;
+            _days = days;
+            _months = months;
+            _daysOfWeek = daysOfWeek;
+        }
+
+        public static bool TryParse(string? value, out CronExpression expression)
+        {
+            expression = null!;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            var parts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length != 5)
+            {
+                return false;
+            }
+
+            if (!TryParseField(parts[0], 0, 59, allowSundaySeven: false, out var minutes) ||
+                !TryParseField(parts[1], 0, 23, allowSundaySeven: false, out var hours) ||
+                !TryParseField(parts[2], 1, 31, allowSundaySeven: false, out var days) ||
+                !TryParseField(parts[3], 1, 12, allowSundaySeven: false, out var months) ||
+                !TryParseField(parts[4], 0, 6, allowSundaySeven: true, out var daysOfWeek))
+            {
+                return false;
+            }
+
+            expression = new CronExpression(minutes, hours, days, months, daysOfWeek);
+            return true;
+        }
+
+        public bool HasOccurrenceBetween(DateTimeOffset lastExclusiveUtc, DateTimeOffset nowInclusiveUtc)
+        {
+            var cursor = TruncateToMinute(lastExclusiveUtc.ToUniversalTime()).AddMinutes(1);
+            var end = TruncateToMinute(nowInclusiveUtc.ToUniversalTime());
+
+            var earliest = end.AddDays(-7);
+            if (cursor < earliest)
+            {
+                cursor = earliest;
+            }
+
+            while (cursor <= end)
+            {
+                if (IsMatch(cursor.UtcDateTime))
+                {
+                    return true;
+                }
+
+                cursor = cursor.AddMinutes(1);
+            }
+
+            return false;
+        }
+
+        public bool IsMatch(DateTime utc)
+        {
+            return _minutes.Contains(utc.Minute) &&
+                   _hours.Contains(utc.Hour) &&
+                   _days.Contains(utc.Day) &&
+                   _months.Contains(utc.Month) &&
+                   _daysOfWeek.Contains((int)utc.DayOfWeek);
+        }
+
+        private static bool TryParseField(string field, int min, int max, bool allowSundaySeven, out HashSet<int> values)
+        {
+            values = new HashSet<int>();
+
+            foreach (var rawPart in field.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var part = rawPart;
+                var step = 1;
+                var slash = part.IndexOf('/');
+                if (slash >= 0)
+                {
+                    if (!int.TryParse(part[(slash + 1)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out step) || step <= 0)
+                    {
+                        return false;
+                    }
+
+                    part = part[..slash];
+                }
+
+                int start;
+                int end;
+                if (part == "*")
+                {
+                    start = min;
+                    end = max;
+                }
+                else
+                {
+                    var dash = part.IndexOf('-');
+                    if (dash >= 0)
+                    {
+                        if (!TryParseCronValue(part[..dash], min, max, allowSundaySeven, out start) ||
+                            !TryParseCronValue(part[(dash + 1)..], min, max, allowSundaySeven, out end) ||
+                            start > end)
+                        {
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        if (!TryParseCronValue(part, min, max, allowSundaySeven, out start))
+                        {
+                            return false;
+                        }
+
+                        end = start;
+                    }
+                }
+
+                for (var value = start; value <= end; value += step)
+                {
+                    values.Add(value);
+                }
+            }
+
+            return values.Count > 0;
+        }
+
+        private static bool TryParseCronValue(string value, int min, int max, bool allowSundaySeven, out int parsed)
+        {
+            parsed = default;
+            if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed))
+            {
+                return false;
+            }
+
+            if (allowSundaySeven && parsed == 7)
+            {
+                parsed = 0;
+            }
+
+            return parsed >= min && parsed <= max;
+        }
+    }
+
+    private async Task<bool> SendSummaryAsync(IServiceProvider serviceProvider, string taskName, string? chatId, CancellationToken ct)
     {
         // Use SummarySkillExecutor to ensure consistent behavior with manual /daily and /weekly commands
         var summaryExecutor = serviceProvider.GetRequiredService<ISummarySkillExecutor>();
@@ -226,6 +521,7 @@ public class SchedulerService : BackgroundService
                 await _bot.SendTextMessageAsync(chatId, summary, cancellationToken: ct);
             }
             _logger.LogInformation("Sent {TaskName} to chat {ChatId}", taskName, chatId);
+            return true;
         }
         else
         {
@@ -233,6 +529,7 @@ public class SchedulerService : BackgroundService
                 taskName,
                 _bot == null ? "null" : "available",
                 string.IsNullOrWhiteSpace(chatId) ? "missing" : "set");
+            return false;
         }
     }
 
@@ -373,4 +670,3 @@ public class SchedulerService : BackgroundService
         }
     }
 }
-
