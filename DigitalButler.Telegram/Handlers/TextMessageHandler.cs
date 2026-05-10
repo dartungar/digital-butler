@@ -27,6 +27,8 @@ public sealed class TextMessageHandler : ITextMessageHandler
     private readonly IVaultSearchSkillExecutor _vaultSearchExecutor;
     private readonly IVaultSearchService _vaultSearchService;
     private readonly IManualSyncRunner _syncRunner;
+    private readonly IObsidianCaptureService _obsidianCapture;
+    private readonly ITimeZoneProvider _timeZoneProvider;
 
     public TextMessageHandler(
         ILogger<TextMessageHandler> logger,
@@ -40,7 +42,9 @@ public sealed class TextMessageHandler : ITextMessageHandler
         ICalendarEventSkillExecutor calendarExecutor,
         IVaultSearchSkillExecutor vaultSearchExecutor,
         IVaultSearchService vaultSearchService,
-        IManualSyncRunner syncRunner)
+        IManualSyncRunner syncRunner,
+        IObsidianCaptureService obsidianCapture,
+        ITimeZoneProvider timeZoneProvider)
     {
         _logger = logger;
         _stateManager = stateManager;
@@ -53,6 +57,8 @@ public sealed class TextMessageHandler : ITextMessageHandler
         _vaultSearchExecutor = vaultSearchExecutor;
         _vaultSearchService = vaultSearchService;
         _syncRunner = syncRunner;
+        _obsidianCapture = obsidianCapture;
+        _timeZoneProvider = timeZoneProvider;
 
         var allowedUserIdStr = config["TELEGRAM_ALLOWED_USER_ID"];
         _allowedUserId = string.IsNullOrWhiteSpace(allowedUserIdStr)
@@ -95,6 +101,25 @@ public sealed class TextMessageHandler : ITextMessageHandler
                 return;
             }
             await HandleAddEventAsync(bot, chatId, eventText, ct);
+            return;
+        }
+
+        if (text.StartsWith("/addnote", StringComparison.OrdinalIgnoreCase) ||
+            text.StartsWith("/obsidian", StringComparison.OrdinalIgnoreCase) ||
+            text.StartsWith("/capture", StringComparison.OrdinalIgnoreCase))
+        {
+            var content = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Skip(1).FirstOrDefault();
+            var target = DetermineObsidianTarget(text);
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                _stateManager.SetPendingObsidianCapture(chatId, target);
+                await SendWithKeyboardAsync(bot, chatId, target == ObsidianCaptureTarget.DailyNote
+                    ? "Send the text, voice note, or photo to append to today's daily note."
+                    : "Send the text, voice note, or photo to append to the Obsidian inbox.", ct);
+                return;
+            }
+
+            await HandleAddToObsidianAsync(bot, chatId, new ObsidianCaptureRequest { TextContent = content }, target, ct);
             return;
         }
 
@@ -164,6 +189,13 @@ public sealed class TextMessageHandler : ITextMessageHandler
                 return;
             }
             await HandleDebugSearchAsync(bot, chatId, query, ct);
+            return;
+        }
+
+        if (!text.StartsWith("/", StringComparison.OrdinalIgnoreCase) &&
+            _stateManager.GetAndRemovePendingObsidianCapture(chatId) is { } pendingTarget)
+        {
+            await HandleAddToObsidianAsync(bot, chatId, new ObsidianCaptureRequest { TextContent = text }, pendingTarget, ct);
             return;
         }
 
@@ -381,16 +413,18 @@ public sealed class TextMessageHandler : ITextMessageHandler
         if (routingResult.NeedsVaultEnrichment)
         {
             vaultQuery = routingResult.VaultSearchQuery ?? text;
+            var tz = await _timeZoneProvider.GetTimeZoneInfoAsync(ct);
+            var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
 
             // Try both the router's vault query AND the original text for date detection
-            var translated = _dateTranslator.TranslateQuery(vaultQuery, DateTimeOffset.UtcNow);
+            var translated = _dateTranslator.TranslateQuery(vaultQuery, localNow);
             startDate = translated.StartDate;
             endDate = translated.EndDate;
 
             // If no date range found in vault query, try the original text
             if (!startDate.HasValue && !endDate.HasValue)
             {
-                translated = _dateTranslator.TranslateQuery(text, DateTimeOffset.UtcNow);
+                translated = _dateTranslator.TranslateQuery(text, localNow);
                 startDate = translated.StartDate;
                 endDate = translated.EndDate;
             }
@@ -411,6 +445,9 @@ public sealed class TextMessageHandler : ITextMessageHandler
             case ButlerSkill.CalendarEvent:
                 var eventText = CalendarEventSkillExecutor.TryExtractEventText(text) ?? text;
                 await HandleAddEventAsync(bot, chatId, eventText, ct);
+                break;
+            case ButlerSkill.AddToObsidian:
+                await HandleAddToObsidianRouteAsync(bot, chatId, text, ct);
                 break;
             case ButlerSkill.VaultSearch:
                 // If we have a date range (temporal query like "what did I do last week?"),
@@ -499,6 +536,113 @@ public sealed class TextMessageHandler : ITextMessageHandler
         }
     }
 
+    private async Task HandleAddToObsidianRouteAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)
+    {
+        var target = DetermineObsidianTarget(text);
+        var content = ExtractObsidianCaptureText(text);
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            _stateManager.SetPendingObsidianCapture(chatId, target);
+            await SendWithKeyboardAsync(bot, chatId, target == ObsidianCaptureTarget.DailyNote
+                ? "Send the text, voice note, or photo to append to today's daily note."
+                : "Send the text, voice note, or photo to append to the Obsidian inbox.", ct);
+            return;
+        }
+
+        await HandleAddToObsidianAsync(bot, chatId, new ObsidianCaptureRequest { TextContent = content }, target, ct);
+    }
+
+    private async Task HandleAddToObsidianAsync(
+        ITelegramBotClient bot,
+        long chatId,
+        ObsidianCaptureRequest request,
+        ObsidianCaptureTarget target,
+        CancellationToken ct)
+    {
+        if (!request.HasContent)
+        {
+            await SendWithKeyboardAsync(bot, chatId, "Nothing to save.", ct);
+            return;
+        }
+
+        try
+        {
+            var result = target == ObsidianCaptureTarget.DailyNote
+                ? await _obsidianCapture.AppendToTodayDailyNoteAsync(request, ct)
+                : await _obsidianCapture.AppendToInboxNoteAsync(request, ct);
+
+            var mediaLine = string.IsNullOrWhiteSpace(result.MediaFileName)
+                ? string.Empty
+                : $"\nMedia: {result.MediaFileName}";
+            await SendWithKeyboardAsync(bot, chatId, $"Saved to {result.TargetDescription}: {result.NotePath}{mediaLine}", ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to save content to Obsidian");
+            await SendWithKeyboardAsync(bot, chatId, TruncateForTelegram(BuildUserFacingError(ex)), ct);
+        }
+    }
+
+    private static ObsidianCaptureTarget DetermineObsidianTarget(string text)
+    {
+        var normalized = text.ToLowerInvariant();
+        return normalized.Contains("daily note", StringComparison.Ordinal) ||
+               normalized.Contains("today's note", StringComparison.Ordinal) ||
+               normalized.Contains("today note", StringComparison.Ordinal)
+            ? ObsidianCaptureTarget.DailyNote
+            : ObsidianCaptureTarget.Inbox;
+    }
+
+    private static string? ExtractObsidianCaptureText(string text)
+    {
+        var trimmed = text.Trim();
+        var colon = trimmed.IndexOf(':');
+        if (colon >= 0)
+        {
+            var intent = trimmed[..colon].ToLowerInvariant();
+            if (ContainsAny(intent, "obsidian", "note", "inbox", "daily") &&
+                ContainsAny(intent, "save", "add", "append", "capture", "remember"))
+            {
+                return trimmed[(colon + 1)..].Trim();
+            }
+        }
+
+        string[] prefixes =
+        [
+            "save this to obsidian",
+            "save to obsidian",
+            "add this to obsidian",
+            "add to obsidian",
+            "append this to obsidian",
+            "append to obsidian",
+            "capture this to obsidian",
+            "capture to obsidian",
+            "remember this in obsidian",
+            "add this to my inbox note in obsidian",
+            "add this to my daily note",
+            "save this to my daily note",
+            "save this in notes",
+            "add this to notes"
+        ];
+
+        foreach (var prefix in prefixes)
+        {
+            if (trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return trimmed[prefix.Length..].Trim().TrimStart(':', '-', ' ').Trim();
+            }
+        }
+
+        return trimmed;
+    }
+
+    private static bool ContainsAny(string text, params string[] keywords)
+    {
+        return keywords.Any(keyword => text.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+    }
 
     private static Task SendWithKeyboardAsync(ITelegramBotClient bot, long chatId, string text, CancellationToken ct)
     {

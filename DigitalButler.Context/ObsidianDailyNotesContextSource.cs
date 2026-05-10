@@ -8,29 +8,42 @@ using Microsoft.Extensions.Options;
 
 namespace DigitalButler.Context;
 
-public sealed class ObsidianDailyNotesContextSource : IContextSource
+public sealed class ObsidianDailyNotesContextSource : IContextSource, IStaleContextCleanupSource
 {
     private readonly ObsidianOptions _options;
     private readonly ObsidianDailyNotesRepository _repo;
     private readonly ContextUpdateLogRepository _logRepo;
+    private readonly TimeZoneService _timeZoneService;
     private readonly ILogger<ObsidianDailyNotesContextSource> _logger;
+    private bool _canCleanStaleItems;
+    private DateTimeOffset? _cleanupWindowStartUtc;
+    private DateTimeOffset? _cleanupWindowEndUtc;
 
     public ObsidianDailyNotesContextSource(
         IOptions<ObsidianOptions> options,
         ObsidianDailyNotesRepository repo,
         ContextUpdateLogRepository logRepo,
+        TimeZoneService timeZoneService,
         ILogger<ObsidianDailyNotesContextSource> logger)
     {
         _options = options.Value;
         _repo = repo;
         _logRepo = logRepo;
+        _timeZoneService = timeZoneService;
         _logger = logger;
     }
 
     public ContextSource Source => ContextSource.Obsidian;
+    public bool CanCleanStaleItems => _canCleanStaleItems;
+    public DateTimeOffset? CleanupWindowStartUtc => _cleanupWindowStartUtc;
+    public DateTimeOffset? CleanupWindowEndUtc => _cleanupWindowEndUtc;
 
     public async Task<IReadOnlyList<ContextItem>> FetchAsync(CancellationToken ct = default)
     {
+        _canCleanStaleItems = false;
+        _cleanupWindowStartUtc = null;
+        _cleanupWindowEndUtc = null;
+
         var sw = Stopwatch.StartNew();
         var log = new ContextUpdateLog
         {
@@ -43,6 +56,8 @@ public sealed class ObsidianDailyNotesContextSource : IContextSource
             // Build the full path pattern
             var dailyNotesDir = Path.Combine(_options.VaultPath, Path.GetDirectoryName(_options.DailyNotesPattern) ?? "");
             var filePattern = Path.GetFileName(_options.DailyNotesPattern);
+            var tz = await _timeZoneService.GetTimeZoneInfoAsync(ct);
+            var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
 
             if (!Directory.Exists(dailyNotesDir))
             {
@@ -53,7 +68,10 @@ public sealed class ObsidianDailyNotesContextSource : IContextSource
             }
 
             // Find all daily note files within lookback window
-            var cutoffDate = DateOnly.FromDateTime(DateTime.Today.AddDays(-_options.LookbackDays));
+            var today = DateOnly.FromDateTime(localNow.DateTime);
+            var cutoffDate = today.AddDays(-_options.LookbackDays);
+            _cleanupWindowStartUtc = LocalDateStartUtc(cutoffDate, tz);
+            _cleanupWindowEndUtc = LocalDateStartUtc(today.AddDays(1), tz);
             var files = Directory.GetFiles(dailyNotesDir, filePattern);
 
             var relevantFiles = files
@@ -107,8 +125,10 @@ public sealed class ObsidianDailyNotesContextSource : IContextSource
             _logger.LogInformation("Obsidian sync complete: {Added} added, {Updated} updated, {Unchanged} unchanged",
                 added, updated, unchanged);
 
+            _canCleanStaleItems = errors.Count == 0;
+
             // Return as ContextItems for summarization pipeline
-            return notes.Select(ToContextItem).ToList();
+            return notes.Select(note => ToContextItem(note, tz)).ToList();
         }
         catch (Exception ex)
         {
@@ -125,7 +145,7 @@ public sealed class ObsidianDailyNotesContextSource : IContextSource
         }
     }
 
-    private static ContextItem ToContextItem(ObsidianDailyNote note)
+    private static ContextItem ToContextItem(ObsidianDailyNote note, TimeZoneInfo tz)
     {
         var body = new StringBuilder();
 
@@ -174,10 +194,16 @@ public sealed class ObsidianDailyNotesContextSource : IContextSource
             Source = ContextSource.Obsidian,
             Title = $"Daily Note: {note.Date:yyyy-MM-dd}",
             Body = body.ToString().Trim(),
-            RelevantDate = note.Date.ToDateTime(TimeOnly.MinValue),
+            RelevantDate = LocalDateStartUtc(note.Date, tz),
             IsTimeless = false,
             ExternalId = $"obsidian:daily:{note.Date:yyyy-MM-dd}",
             Category = "Daily Notes"
         };
+    }
+
+    private static DateTimeOffset LocalDateStartUtc(DateOnly date, TimeZoneInfo tz)
+    {
+        var local = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(local, tz), TimeSpan.Zero);
     }
 }

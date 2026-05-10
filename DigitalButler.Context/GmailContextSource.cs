@@ -10,10 +10,13 @@ using DigitalButler.Common;
 
 namespace DigitalButler.Context;
 
-public sealed class GmailContextSource : IContextSource
+public sealed class GmailContextSource : IContextSource, IStaleContextCleanupSource
 {
     private readonly GmailOptions _options;
     private readonly ILogger<GmailContextSource> _logger;
+    private bool _canCleanStaleItems;
+    private DateTimeOffset? _cleanupWindowStartUtc;
+    private DateTimeOffset? _cleanupWindowEndUtc;
 
     public GmailContextSource(IOptions<GmailOptions> options, ILogger<GmailContextSource> logger)
     {
@@ -22,9 +25,16 @@ public sealed class GmailContextSource : IContextSource
     }
 
     public ContextSource Source => ContextSource.Gmail;
+    public bool CanCleanStaleItems => _canCleanStaleItems;
+    public DateTimeOffset? CleanupWindowStartUtc => _cleanupWindowStartUtc;
+    public DateTimeOffset? CleanupWindowEndUtc => _cleanupWindowEndUtc;
 
     public async Task<IReadOnlyList<ContextItem>> FetchAsync(CancellationToken ct = default)
     {
+        _canCleanStaleItems = false;
+        _cleanupWindowStartUtc = null;
+        _cleanupWindowEndUtc = null;
+
         var accounts = ParseAccounts(_options).ToList();
         if (accounts.Count == 0)
         {
@@ -32,13 +42,23 @@ public sealed class GmailContextSource : IContextSource
             return Array.Empty<ContextItem>();
         }
 
+        var nowUtc = DateTimeOffset.UtcNow;
+        _cleanupWindowStartUtc = accounts
+            .Select(account => new DateTimeOffset(nowUtc.UtcDateTime.Date.AddDays(-Math.Abs(account.DaysBack)), TimeSpan.Zero))
+            .DefaultIfEmpty(nowUtc)
+            .Min();
+        _cleanupWindowEndUtc = nowUtc.AddDays(1);
+
         var results = new List<ContextItem>(capacity: 256);
+        var hadErrors = false;
+        var wasCapped = false;
         foreach (var account in accounts)
         {
             try
             {
-                var items = await FetchAccountAsync(account, ct);
-                results.AddRange(items);
+                var accountResult = await FetchAccountAsync(account, ct);
+                results.AddRange(accountResult.Items);
+                wasCapped |= accountResult.WasCapped;
             }
             catch (OperationCanceledException)
             {
@@ -46,8 +66,15 @@ public sealed class GmailContextSource : IContextSource
             }
             catch (Exception ex)
             {
+                hadErrors = true;
                 _logger.LogWarning(ex, "Failed to fetch Gmail for account '{AccountName}'", account.Name);
             }
+        }
+
+        _canCleanStaleItems = !hadErrors && !wasCapped;
+        if (wasCapped)
+        {
+            _logger.LogInformation("Skipping Gmail stale cleanup because one or more accounts hit MaxMessages");
         }
 
         return results;
@@ -64,6 +91,8 @@ public sealed class GmailContextSource : IContextSource
         int DaysBack,
         int MaxMessages
     );
+
+    private sealed record FetchAccountResult(IReadOnlyList<ContextItem> Items, bool WasCapped);
 
     private static IEnumerable<AccountCfg> ParseAccounts(GmailOptions options)
     {
@@ -113,7 +142,7 @@ public sealed class GmailContextSource : IContextSource
         }
     }
 
-    private async Task<IReadOnlyList<ContextItem>> FetchAccountAsync(AccountCfg account, CancellationToken ct)
+    private async Task<FetchAccountResult> FetchAccountAsync(AccountCfg account, CancellationToken ct)
     {
         using var client = new ImapClient();
         client.CheckCertificateRevocation = true;
@@ -122,7 +151,7 @@ public sealed class GmailContextSource : IContextSource
         await client.ConnectAsync(account.Host, account.Port, socketOptions, ct);
         await client.AuthenticateAsync(account.Username, account.Password, ct);
 
-        var inbox = client.Inbox;
+        var inbox = client.Inbox ?? throw new InvalidOperationException("Gmail IMAP inbox is not available.");
         await inbox.OpenAsync(FolderAccess.ReadOnly, ct);
 
         var since = DateTime.UtcNow.Date.AddDays(-Math.Abs(account.DaysBack));
@@ -136,10 +165,11 @@ public sealed class GmailContextSource : IContextSource
         if (uids.Count == 0)
         {
             await client.DisconnectAsync(true, ct);
-            return Array.Empty<ContextItem>();
+            return new FetchAccountResult(Array.Empty<ContextItem>(), WasCapped: false);
         }
 
         var ordered = uids.OrderByDescending(u => u.Id).Take(Math.Max(1, account.MaxMessages)).ToList();
+        var wasCapped = uids.Count > ordered.Count;
         var summaries = await inbox.FetchAsync(
             ordered,
             MessageSummaryItems.Envelope | MessageSummaryItems.InternalDate | MessageSummaryItems.UniqueId,
@@ -191,7 +221,7 @@ public sealed class GmailContextSource : IContextSource
         }
 
         await client.DisconnectAsync(true, ct);
-        return results;
+        return new FetchAccountResult(results, wasCapped);
     }
 
     private static bool TryParseBool(string? value, out bool result)

@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
+using System.Data.Common;
 using Dapper;
 using DigitalButler.Common;
+using Microsoft.Data.Sqlite;
 
 namespace DigitalButler.Data.Repositories;
 
@@ -96,8 +98,22 @@ public sealed class VaultSearchRepository
     public async Task<int> DeleteNoteAsync(string filePath, CancellationToken ct = default)
     {
         await using var conn = await _db.OpenAsync(ct);
-        const string sql = "DELETE FROM VaultNotes WHERE FilePath = @FilePath;";
-        return await conn.ExecuteAsync(sql, new { FilePath = filePath });
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        var noteIds = (await conn.QueryAsync<Guid>(
+            "SELECT Id FROM VaultNotes WHERE FilePath = @FilePath;",
+            new { FilePath = filePath },
+            tx)).ToList();
+
+        await DeleteChunksForNotesAsync(conn, tx, noteIds);
+
+        var deleted = await conn.ExecuteAsync(
+            "DELETE FROM VaultNotes WHERE FilePath = @FilePath;",
+            new { FilePath = filePath },
+            tx);
+
+        await tx.CommitAsync(ct);
+        return deleted;
     }
 
     public async Task<int> DeleteNotesAsync(IEnumerable<string> filePaths, CancellationToken ct = default)
@@ -106,8 +122,22 @@ public sealed class VaultSearchRepository
         if (list.Count == 0) return 0;
 
         await using var conn = await _db.OpenAsync(ct);
-        const string sql = "DELETE FROM VaultNotes WHERE FilePath IN @FilePaths;";
-        return await conn.ExecuteAsync(sql, new { FilePaths = list });
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        var noteIds = (await conn.QueryAsync<Guid>(
+            "SELECT Id FROM VaultNotes WHERE FilePath IN @FilePaths;",
+            new { FilePaths = list },
+            tx)).ToList();
+
+        await DeleteChunksForNotesAsync(conn, tx, noteIds);
+
+        var deleted = await conn.ExecuteAsync(
+            "DELETE FROM VaultNotes WHERE FilePath IN @FilePaths;",
+            new { FilePaths = list },
+            tx);
+
+        await tx.CommitAsync(ct);
+        return deleted;
     }
 
     #endregion
@@ -135,61 +165,51 @@ public sealed class VaultSearchRepository
         await using var conn = await _db.OpenAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
 
-        // Delete existing chunks and their embeddings
-        var existingChunkIds = await conn.QueryAsync<Guid>(
-            "SELECT Id FROM NoteChunks WHERE NoteId = @NoteId;",
-            new { NoteId = noteId },
-            tx);
+        await ReplaceChunksForNoteAsync(conn, tx, noteId, chunkList);
 
-        var idList = existingChunkIds.ToList();
-        if (idList.Count > 0)
+        await tx.CommitAsync(ct);
+    }
+
+    public async Task SaveNoteWithChunksAsync(VaultNote note, IEnumerable<NoteChunk> chunks, CancellationToken ct = default)
+    {
+        var chunkList = chunks.ToList();
+        if (note.Id == Guid.Empty)
         {
-            // Delete from vector table first (foreign key-like relationship)
-            await conn.ExecuteAsync(
-                "DELETE FROM vec_note_chunks WHERE chunk_id IN @Ids;",
-                new { Ids = idList.Select(id => id.ToString()).ToList() },
-                tx);
-
-            await conn.ExecuteAsync(
-                "DELETE FROM NoteChunks WHERE NoteId = @NoteId;",
-                new { NoteId = noteId },
-                tx);
+            note.Id = Guid.NewGuid();
         }
 
-        // Insert new chunks
+        await using var conn = await _db.OpenAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        const string upsertNoteSql = """
+            INSERT INTO VaultNotes (Id, FilePath, Title, ContentHash, FileModifiedAt, CreatedAt, UpdatedAt)
+            VALUES (@Id, @FilePath, @Title, @ContentHash, @FileModifiedAt, @CreatedAt, @UpdatedAt)
+            ON CONFLICT(FilePath) DO UPDATE SET
+                Title = excluded.Title,
+                ContentHash = excluded.ContentHash,
+                FileModifiedAt = excluded.FileModifiedAt,
+                UpdatedAt = excluded.UpdatedAt
+            RETURNING Id;
+            """;
+
+        var noteId = await conn.ExecuteScalarAsync<Guid>(upsertNoteSql, new
+        {
+            note.Id,
+            note.FilePath,
+            note.Title,
+            note.ContentHash,
+            note.FileModifiedAt,
+            note.CreatedAt,
+            note.UpdatedAt
+        }, tx);
+
+        note.Id = noteId;
         foreach (var chunk in chunkList)
         {
-            const string insertChunkSql = """
-                INSERT INTO NoteChunks (Id, NoteId, ChunkIndex, ChunkText, StartLine, EndLine, CreatedAt)
-                VALUES (@Id, @NoteId, @ChunkIndex, @ChunkText, @StartLine, @EndLine, @CreatedAt);
-                """;
-
-            await conn.ExecuteAsync(insertChunkSql, new
-            {
-                chunk.Id,
-                chunk.NoteId,
-                chunk.ChunkIndex,
-                chunk.ChunkText,
-                chunk.StartLine,
-                chunk.EndLine,
-                chunk.CreatedAt
-            }, tx);
-
-            // Insert embedding into vector table if available
-            if (chunk.Embedding is { Length: > 0 })
-            {
-                const string insertVecSql = """
-                    INSERT INTO vec_note_chunks (chunk_id, embedding)
-                    VALUES (@ChunkId, @Embedding);
-                    """;
-
-                await conn.ExecuteAsync(insertVecSql, new
-                {
-                    ChunkId = chunk.Id.ToString(),
-                    Embedding = FloatsToBlob(chunk.Embedding)
-                }, tx);
-            }
+            chunk.NoteId = noteId;
         }
+
+        await ReplaceChunksForNoteAsync(conn, tx, noteId, chunkList);
 
         await tx.CommitAsync(ct);
     }
@@ -199,27 +219,7 @@ public sealed class VaultSearchRepository
         await using var conn = await _db.OpenAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
 
-        // Get chunk IDs first
-        var chunkIds = await conn.QueryAsync<Guid>(
-            "SELECT Id FROM NoteChunks WHERE NoteId = @NoteId;",
-            new { NoteId = noteId },
-            tx);
-
-        var idList = chunkIds.ToList();
-        if (idList.Count > 0)
-        {
-            // Delete from vector table
-            await conn.ExecuteAsync(
-                "DELETE FROM vec_note_chunks WHERE chunk_id IN @Ids;",
-                new { Ids = idList.Select(id => id.ToString()).ToList() },
-                tx);
-        }
-
-        // Delete chunks
-        await conn.ExecuteAsync(
-            "DELETE FROM NoteChunks WHERE NoteId = @NoteId;",
-            new { NoteId = noteId },
-            tx);
+        await DeleteChunksForNotesAsync(conn, tx, new[] { noteId });
 
         await tx.CommitAsync(ct);
     }
@@ -400,6 +400,70 @@ public sealed class VaultSearchRepository
     #endregion
 
     #region Helpers
+
+    private static async Task ReplaceChunksForNoteAsync(SqliteConnection conn, DbTransaction tx, Guid noteId, IReadOnlyList<NoteChunk> chunks)
+    {
+        await DeleteChunksForNotesAsync(conn, tx, new[] { noteId });
+
+        foreach (var chunk in chunks)
+        {
+            const string insertChunkSql = """
+                INSERT INTO NoteChunks (Id, NoteId, ChunkIndex, ChunkText, StartLine, EndLine, CreatedAt)
+                VALUES (@Id, @NoteId, @ChunkIndex, @ChunkText, @StartLine, @EndLine, @CreatedAt);
+                """;
+
+            await conn.ExecuteAsync(insertChunkSql, new
+            {
+                chunk.Id,
+                NoteId = noteId,
+                chunk.ChunkIndex,
+                chunk.ChunkText,
+                chunk.StartLine,
+                chunk.EndLine,
+                chunk.CreatedAt
+            }, tx);
+
+            if (chunk.Embedding is { Length: > 0 })
+            {
+                const string insertVecSql = """
+                    INSERT INTO vec_note_chunks (chunk_id, embedding)
+                    VALUES (@ChunkId, @Embedding);
+                    """;
+
+                await conn.ExecuteAsync(insertVecSql, new
+                {
+                    ChunkId = chunk.Id.ToString(),
+                    Embedding = FloatsToBlob(chunk.Embedding)
+                }, tx);
+            }
+        }
+    }
+
+    private static async Task DeleteChunksForNotesAsync(SqliteConnection conn, DbTransaction tx, IReadOnlyCollection<Guid> noteIds)
+    {
+        if (noteIds.Count == 0)
+        {
+            return;
+        }
+
+        var chunkIds = (await conn.QueryAsync<Guid>(
+            "SELECT Id FROM NoteChunks WHERE NoteId IN @NoteIds;",
+            new { NoteIds = noteIds },
+            tx)).ToList();
+
+        if (chunkIds.Count > 0)
+        {
+            await conn.ExecuteAsync(
+                "DELETE FROM vec_note_chunks WHERE chunk_id IN @Ids;",
+                new { Ids = chunkIds.Select(id => id.ToString()).ToList() },
+                tx);
+        }
+
+        await conn.ExecuteAsync(
+            "DELETE FROM NoteChunks WHERE NoteId IN @NoteIds;",
+            new { NoteIds = noteIds },
+            tx);
+    }
 
     private static byte[] FloatsToBlob(float[] floats)
     {
