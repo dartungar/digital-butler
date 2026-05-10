@@ -5,43 +5,44 @@
 
 <PageTitle>All Context</PageTitle>
 
-<div class="content">
-    <h3 class="title is-3">All Context Items</h3>
-    <p class="subtitle is-6">View, edit, and delete Butler context items.</p>
-</div>
+<PageHeader Title="All Context Items" Subtitle="View, edit, and clean up the context that feeds Butler's skills." Eyebrow="Context" />
 
-<div class="buttons">
-    <button class="button is-danger is-light" type="button" title="Delete selected" aria-label="Delete selected"
-            disabled="@(_selectedIds.Count == 0)" @onclick="OpenDeleteSelected">
-        <span class="icon" aria-hidden="true">✖</span>
-        <span>Delete selected (@_selectedIds.Count)</span>
-    </button>
+<div class="command-bar">
+    <div class="command-bar__group">
+        <button class="button is-danger is-light" type="button" title="Delete selected" aria-label="Delete selected"
+                disabled="@(_selectedIds.Count == 0)" @onclick="OpenDeleteSelected">
+            <UiIcon Name="trash" />
+            <span>Delete selected (@_selectedIds.Count)</span>
+        </button>
+    </div>
 
-    <div class="field has-addons">
-        <div class="control">
-            <div class="select">
-                <select @bind="_deleteSourceText">
-                    <option value="">(Choose source to delete)</option>
-                    @foreach (var s in _sources)
-                    {
-                        <option value="@s">@s</option>
-                    }
-                </select>
+    <div class="command-bar__group">
+        <div class="field has-addons">
+            <div class="control">
+                <div class="select">
+                    <select @bind="_deleteSourceText">
+                        <option value="">Choose source to delete</option>
+                        @foreach (var s in _sources)
+                        {
+                            <option value="@s">@s</option>
+                        }
+                    </select>
+                </div>
             </div>
-        </div>
-        <div class="control">
-            <button class="button is-danger is-light" type="button" title="Delete all from source" aria-label="Delete all from source"
-                    disabled="@(string.IsNullOrWhiteSpace(_deleteSourceText))" @onclick="OpenDeleteSource">
-                <span class="icon" aria-hidden="true">✖</span>
-                <span>Delete all from source</span>
-            </button>
+            <div class="control">
+                <button class="button is-danger is-light" type="button" title="Delete all from source" aria-label="Delete all from source"
+                        disabled="@(string.IsNullOrWhiteSpace(_deleteSourceText))" @onclick="OpenDeleteSource">
+                    <UiIcon Name="trash" />
+                    <span>Delete source</span>
+                </button>
+            </div>
         </div>
     </div>
 </div>
 
 @if (_items is null)
 {
-    <p>Loading...</p>
+    <div class="loading-state">Loading context items...</div>
 }
 else
 {
@@ -51,7 +52,17 @@ else
             <p class="subtitle is-6">Click a row to edit, or use the actions.</p>
         </div>
         <div class="table-container">
-            <table class="table is-fullwidth is-striped is-hoverable">
+            <table class="table is-fullwidth is-striped is-hoverable context-table">
+                <colgroup>
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                </colgroup>
                 <thead>
                     <tr>
                         <th style="width: 1%; white-space: nowrap;">
@@ -77,27 +88,29 @@ else
                                 <input type="checkbox" checked="@_selectedIds.Contains(item.Id)" @onchange="(e) => ToggleSelected(item.Id, e)" />
                             </label>
                         </td>
-                        <td>@item.Source</td>
-                        <td>@item.Title</td>
-                        <td style="max-width:520px; white-space:pre-wrap; overflow-wrap:anywhere;">
+                        <td class="context-table__source">@item.Source</td>
+                        <td class="context-table__title">@item.Title</td>
+                        <td class="context-table__body">
+                            <div class="context-table__body-preview">
                             @if (!string.IsNullOrWhiteSpace(item.Summary))
                             {
-                                <p><strong>Summary:</strong> @item.Summary</p>
+                                <p class="context-table__summary"><strong>Summary:</strong> @item.Summary</p>
                             }
                             <div>@item.Body</div>
+                            </div>
                         </td>
-                        <td>@item.RelevantDate?.LocalDateTime.ToString("g")</td>
-                        <td>@item.IsTimeless</td>
-                        <td>@item.UpdatedAt.LocalDateTime</td>
-                        <td>
-                                <div class="buttons are-small">
-                                <button class="button is-link is-light" type="button" title="Edit" aria-label="Edit"
+                        <td class="context-table__date">@item.RelevantDate?.LocalDateTime.ToString("g")</td>
+                        <td class="context-table__flag">@item.IsTimeless</td>
+                        <td class="context-table__updated">@item.UpdatedAt.LocalDateTime</td>
+                        <td class="context-table__actions">
+                            <div class="buttons are-small">
+                                <button class="button is-link is-light is-icon" type="button" title="Edit" aria-label="Edit"
                                         @onclick:stopPropagation="true" @onclick="() => OpenEdit(item)">
-                                    <span class="icon" aria-hidden="true">✎</span>
+                                    <UiIcon Name="edit" />
                                 </button>
-                                <button class="button is-danger is-light" type="button" title="Delete" aria-label="Delete"
+                                <button class="button is-danger is-light is-icon" type="button" title="Delete" aria-label="Delete"
                                         @onclick:stopPropagation="true" @onclick="() => OpenDelete(item)">
-                                    <span class="icon" aria-hidden="true">✖</span>
+                                    <UiIcon Name="trash" />
                                 </button>
                             </div>
                         </td>
@@ -184,7 +197,7 @@ else
                     <div class="buttons">
                         <button class="button is-primary" type="submit" disabled="@_saving">Save</button>
                         <button class="button is-danger is-light" type="button" title="Delete" aria-label="Delete" @onclick="BeginDelete" disabled="@_saving">
-                            <span class="icon" aria-hidden="true">✖</span>
+                            <UiIcon Name="trash" />
                         </button>
                         <button class="button" type="button" @onclick="CloseModal" disabled="@_saving">Close</button>
                     </div>

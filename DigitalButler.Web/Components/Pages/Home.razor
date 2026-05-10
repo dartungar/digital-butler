@@ -7,9 +7,29 @@
 
 <PageTitle>Dashboard</PageTitle>
 
-<div class="content">
-    <h3 class="title is-3">Dashboard</h3>
-    <p class="subtitle is-6">Quick access to admin tools and recent context.</p>
+<PageHeader Title="Dashboard" Subtitle="Quick access to admin tools, summaries, syncs, and the freshest context Butler has collected." Eyebrow="Admin">
+    <Actions>
+        <a class="button is-link is-light" href="/context/all">View Context</a>
+        <a class="button is-primary" href="/context/sync">Sync Sources</a>
+    </Actions>
+</PageHeader>
+
+<div class="metric-grid">
+    <div class="metric-card">
+        <div class="metric-label">Recent Items</div>
+        <div class="metric-value">@(_recent?.Count ?? 0)</div>
+        <div class="metric-note">Loaded from the latest context window.</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Sources</div>
+        <div class="metric-value">@(_recent?.Select(x => x.Source).Distinct().Count() ?? 0)</div>
+        <div class="metric-note">Distinct sources represented below.</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Timezone</div>
+        <div class="metric-value">@((_currentTimezone ?? "Loading").Split('/').Last())</div>
+        <div class="metric-note">@(_currentTimezone ?? "Loading timezone settings...")</div>
+    </div>
 </div>
 
 <div class="box">
@@ -42,9 +62,11 @@
 <div class="box">
     <div class="content">
         <h5 class="title is-5">Test Summaries</h5>
+        <p class="subtitle is-6">Run summary prompts on demand without waiting for the schedule.</p>
     </div>
     <div class="buttons">
         <button class="button is-primary is-light" type="button" disabled="@_dailyRunning" @onclick="RunDailySummaryAsync">
+            <UiIcon Name="play" />
             @if (_dailyRunning)
             {
                 <span>Daily...</span>
@@ -56,6 +78,7 @@
         </button>
 
         <button class="button is-primary is-light" type="button" disabled="@_weeklyRunning" @onclick="RunWeeklySummaryAsync">
+            <UiIcon Name="play" />
             @if (_weeklyRunning)
             {
                 <span>Weekly...</span>
@@ -80,11 +103,11 @@
     </div>
     @if (_recent is null)
     {
-        <p>Loading...</p>
+        <div class="loading-state">Loading recent context...</div>
     }
     else if (_recent.Count == 0)
     {
-        <p>No context yet.</p>
+        <div class="empty-state">No context yet. Run a sync to start filling the workspace.</div>
     }
     else
     {

@@ -7,56 +7,57 @@
 
 <PageTitle>Sync Logs</PageTitle>
 
-<div class="content">
-    <h3 class="title is-3">Context Sync</h3>
-    <p class="subtitle is-6">Manually trigger context source synchronization and view sync history.</p>
-</div>
+<PageHeader Title="Context Sync" Subtitle="Manually trigger context source synchronization and inspect the latest sync history." Eyebrow="Context" />
 
 <div class="box">
     <div class="content">
         <h5 class="title is-5">Manual Sync</h5>
     </div>
     <div class="buttons">
-        <button class="button is-link" type="button" disabled="@_syncing" @onclick="RunSyncAsync">
+        <button class="button is-link @(_syncing ? "is-loading" : null)" type="button" disabled="@_syncing" @onclick="RunSyncAsync">
             @if (_syncing)
             {
                 <span>Syncing all...</span>
             }
             else
             {
+                <UiIcon Name="sync" />
                 <span>Sync All</span>
             }
         </button>
 
-        <button class="button is-link is-light" type="button" disabled="@_obsidianSyncing" @onclick="RunObsidianSyncAsync">
+        <button class="button is-link is-light @(_obsidianSyncing ? "is-loading" : null)" type="button" disabled="@_obsidianSyncing" @onclick="RunObsidianSyncAsync">
             @if (_obsidianSyncing)
             {
                 <span>Obsidian...</span>
             }
             else
             {
+                <UiIcon Name="note" />
                 <span>Sync Obsidian</span>
             }
         </button>
 
-        <button class="button is-link is-light" type="button" disabled="@_calendarSyncing" @onclick="RunCalendarSyncAsync">
+        <button class="button is-link is-light @(_calendarSyncing ? "is-loading" : null)" type="button" disabled="@_calendarSyncing" @onclick="RunCalendarSyncAsync">
             @if (_calendarSyncing)
             {
                 <span>Calendar...</span>
             }
             else
             {
+                <UiIcon Name="calendar" />
                 <span>Sync Calendar</span>
             }
         </button>
 
-        <button class="button is-link is-light" type="button" disabled="@_gmailSyncing" @onclick="RunGmailSyncAsync">
+        <button class="button is-link is-light @(_gmailSyncing ? "is-loading" : null)" type="button" disabled="@_gmailSyncing" @onclick="RunGmailSyncAsync">
             @if (_gmailSyncing)
             {
                 <span>Gmail...</span>
             }
             else
             {
+                <UiIcon Name="mail" />
                 <span>Sync Gmail</span>
             }
         </button>
@@ -75,11 +76,11 @@
 
     @if (_logs is null)
     {
-        <p>Loading...</p>
+        <div class="loading-state">Loading sync logs...</div>
     }
     else if (_logs.Count == 0)
     {
-        <p>No sync logs yet.</p>
+        <div class="empty-state">No sync logs yet. Run a sync to create the first log entry.</div>
     }
     else
     {

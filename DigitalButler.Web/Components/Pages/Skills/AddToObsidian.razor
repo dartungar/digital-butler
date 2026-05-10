@@ -7,10 +7,7 @@
 
 <PageTitle>Add to Obsidian</PageTitle>
 
-<div class="content">
-    <h3 class="title is-3">Add to Obsidian</h3>
-    <p class="subtitle is-6">Configure where Telegram content should be written inside the Obsidian vault.</p>
-</div>
+<PageHeader Title="Add to Obsidian" Subtitle="Configure where Telegram content should be written inside the Obsidian vault." Eyebrow="Skill" />
 
 <div class="box">
     <div class="content">
@@ -20,7 +17,7 @@
 
     @if (_settings is null)
     {
-        <p>Loading...</p>
+        <div class="loading-state">Loading Obsidian capture settings...</div>
     }
     else
     {
