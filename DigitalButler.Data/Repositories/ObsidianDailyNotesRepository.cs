@@ -58,13 +58,12 @@ public sealed class ObsidianDailyNotesRepository
         {
             var dateStr = note.Date.ToString("yyyy-MM-dd");
 
-            // Check if exists and compare FileModifiedAt
-            var existing = await conn.QuerySingleOrDefaultAsync<ObsidianDailyNoteRow>(
-                "SELECT Date, FileModifiedAt, CreatedAt FROM ObsidianDailyNotes WHERE Date = @Date",
+            var existingRow = await conn.QuerySingleOrDefaultAsync<ObsidianDailyNoteRow>(
+                "SELECT * FROM ObsidianDailyNotes WHERE Date = @Date",
                 new { Date = dateStr },
                 tx);
 
-            if (existing is null)
+            if (existingRow is null)
             {
                 // Insert new
                 note.CreatedAt = now;
@@ -72,17 +71,21 @@ public sealed class ObsidianDailyNotesRepository
                 await InsertAsync(conn, tx, note);
                 added++;
             }
-            else if (note.FileModifiedAt > existing.FileModifiedAt)
-            {
-                // Update changed
-                note.CreatedAt = existing.CreatedAt;
-                note.UpdatedAt = now;
-                await UpdateAsync(conn, tx, note);
-                updated++;
-            }
             else
             {
-                unchanged++;
+                var existing = Map(existingRow);
+                if (HasChanged(note, existing))
+                {
+                    // Update changed
+                    note.CreatedAt = existing.CreatedAt;
+                    note.UpdatedAt = now;
+                    await UpdateAsync(conn, tx, note);
+                    updated++;
+                }
+                else
+                {
+                    unchanged++;
+                }
             }
         }
 
@@ -101,7 +104,7 @@ public sealed class ObsidianDailyNotesRepository
                 CompletedTasks, PendingTasks, InQuestionTasks, PartiallyCompleteTasks,
                 RescheduledTasks, CancelledTasks, StarredTasks, AttentionTasks,
                 InformationTasks, IdeaTasks, Notes, Tags,
-                FilePath, FileModifiedAt, CreatedAt, UpdatedAt
+                FilePath, ContentHash, FileModifiedAt, CreatedAt, UpdatedAt
             ) VALUES (
                 @Date, @LifeSatisfaction, @SelfEsteem, @Presence, @Energy, @Motivation, @Optimism,
                 @Stress, @Irritability, @Obsession, @OfflineTime, @MeditationMinutes, @Weight,
@@ -110,7 +113,7 @@ public sealed class ObsidianDailyNotesRepository
                 @CompletedTasks, @PendingTasks, @InQuestionTasks, @PartiallyCompleteTasks,
                 @RescheduledTasks, @CancelledTasks, @StarredTasks, @AttentionTasks,
                 @InformationTasks, @IdeaTasks, @Notes, @Tags,
-                @FilePath, @FileModifiedAt, @CreatedAt, @UpdatedAt
+                @FilePath, @ContentHash, @FileModifiedAt, @CreatedAt, @UpdatedAt
             );
             """;
 
@@ -134,7 +137,8 @@ public sealed class ObsidianDailyNotesRepository
                 StarredTasks = @StarredTasks, AttentionTasks = @AttentionTasks,
                 InformationTasks = @InformationTasks, IdeaTasks = @IdeaTasks,
                 Notes = @Notes, Tags = @Tags,
-                FilePath = @FilePath, FileModifiedAt = @FileModifiedAt, UpdatedAt = @UpdatedAt
+                FilePath = @FilePath, ContentHash = @ContentHash,
+                FileModifiedAt = @FileModifiedAt, UpdatedAt = @UpdatedAt
             WHERE Date = @Date;
             """;
 
@@ -180,10 +184,65 @@ public sealed class ObsidianDailyNotesRepository
         note.Notes,
         Tags = SerializeList(note.Tags),
         note.FilePath,
+        note.ContentHash,
         note.FileModifiedAt,
         note.CreatedAt,
         note.UpdatedAt
     };
+
+    private static bool HasChanged(ObsidianDailyNote incoming, ObsidianDailyNote existing)
+    {
+        return incoming.LifeSatisfaction != existing.LifeSatisfaction ||
+            incoming.SelfEsteem != existing.SelfEsteem ||
+            incoming.Presence != existing.Presence ||
+            incoming.Energy != existing.Energy ||
+            incoming.Motivation != existing.Motivation ||
+            incoming.Optimism != existing.Optimism ||
+            incoming.Stress != existing.Stress ||
+            incoming.Irritability != existing.Irritability ||
+            incoming.Obsession != existing.Obsession ||
+            incoming.OfflineTime != existing.OfflineTime ||
+            incoming.MeditationMinutes != existing.MeditationMinutes ||
+            incoming.Weight != existing.Weight ||
+            incoming.SoulCount != existing.SoulCount ||
+            !ListsEqual(incoming.SoulItems, existing.SoulItems) ||
+            incoming.BodyCount != existing.BodyCount ||
+            !ListsEqual(incoming.BodyItems, existing.BodyItems) ||
+            incoming.AreasCount != existing.AreasCount ||
+            !ListsEqual(incoming.AreasItems, existing.AreasItems) ||
+            incoming.LifeCount != existing.LifeCount ||
+            !ListsEqual(incoming.LifeItems, existing.LifeItems) ||
+            incoming.IndulgingCount != existing.IndulgingCount ||
+            !ListsEqual(incoming.IndulgingItems, existing.IndulgingItems) ||
+            !ListsEqual(incoming.WeatherItems, existing.WeatherItems) ||
+            !ListsEqual(incoming.CompletedTasks, existing.CompletedTasks) ||
+            !ListsEqual(incoming.PendingTasks, existing.PendingTasks) ||
+            !ListsEqual(incoming.InQuestionTasks, existing.InQuestionTasks) ||
+            !ListsEqual(incoming.PartiallyCompleteTasks, existing.PartiallyCompleteTasks) ||
+            !ListsEqual(incoming.RescheduledTasks, existing.RescheduledTasks) ||
+            !ListsEqual(incoming.CancelledTasks, existing.CancelledTasks) ||
+            !ListsEqual(incoming.StarredTasks, existing.StarredTasks) ||
+            !ListsEqual(incoming.AttentionTasks, existing.AttentionTasks) ||
+            !ListsEqual(incoming.InformationTasks, existing.InformationTasks) ||
+            !ListsEqual(incoming.IdeaTasks, existing.IdeaTasks) ||
+            !string.Equals(incoming.Notes, existing.Notes, StringComparison.Ordinal) ||
+            !ListsEqual(incoming.Tags, existing.Tags) ||
+            !string.Equals(incoming.FilePath, existing.FilePath, StringComparison.Ordinal) ||
+            !string.Equals(incoming.ContentHash, existing.ContentHash, StringComparison.Ordinal) ||
+            !Nullable.Equals(incoming.FileModifiedAt, existing.FileModifiedAt);
+    }
+
+    private static bool ListsEqual(List<string>? left, List<string>? right)
+    {
+        var leftEmpty = left is null || left.Count == 0;
+        var rightEmpty = right is null || right.Count == 0;
+        if (leftEmpty || rightEmpty)
+        {
+            return leftEmpty == rightEmpty;
+        }
+
+        return left!.SequenceEqual(right!, StringComparer.Ordinal);
+    }
 
     private static string? SerializeList(List<string>? list)
     {
@@ -238,6 +297,7 @@ public sealed class ObsidianDailyNotesRepository
         Notes = row.Notes,
         Tags = DeserializeList(row.Tags),
         FilePath = row.FilePath,
+        ContentHash = row.ContentHash ?? string.Empty,
         FileModifiedAt = row.FileModifiedAt,
         CreatedAt = row.CreatedAt,
         UpdatedAt = row.UpdatedAt
@@ -282,6 +342,7 @@ public sealed class ObsidianDailyNotesRepository
         public string? Notes { get; set; }
         public string? Tags { get; set; }
         public string FilePath { get; set; } = string.Empty;
+        public string? ContentHash { get; set; }
         public DateTimeOffset? FileModifiedAt { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
         public DateTimeOffset UpdatedAt { get; set; }

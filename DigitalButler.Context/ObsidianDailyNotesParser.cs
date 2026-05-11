@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using DigitalButler.Common;
@@ -46,6 +47,7 @@ public static class ObsidianDailyNotesParser
         var note = new ObsidianDailyNote
         {
             FilePath = filePath,
+            ContentHash = ComputeHash(content),
             FileModifiedAt = new DateTimeOffset(fileInfo.LastWriteTimeUtc, TimeSpan.Zero)
         };
 
@@ -454,6 +456,12 @@ public static class ObsidianDailyNotesParser
             normalized = normalized["journal/".Length..];
         }
         return normalized;
+    }
+
+    private static string ComputeHash(string content)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(content));
+        return Convert.ToHexString(bytes);
     }
 
     private static ObsidianTaskStatus ParseTaskStatus(string marker)
