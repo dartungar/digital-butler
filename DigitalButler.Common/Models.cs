@@ -366,6 +366,7 @@ public class ObsidianDailyNote
 
     // Metadata
     public string FilePath { get; set; } = string.Empty;
+    public string ContentHash { get; set; } = string.Empty;
     public DateTimeOffset? FileModifiedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

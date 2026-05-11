@@ -138,6 +138,7 @@ public sealed class ButlerSchemaInitializer
                 Notes TEXT NULL,
                 Tags TEXT NULL,
                 FilePath TEXT NOT NULL,
+                ContentHash TEXT NULL,
                 FileModifiedAt TEXT NULL,
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL
@@ -240,6 +241,15 @@ public sealed class ButlerSchemaInitializer
         try
         {
             await conn.ExecuteAsync("ALTER TABLE ContextItems ADD COLUMN MediaType TEXT NULL;");
+        }
+        catch
+        {
+            // Intentionally ignored
+        }
+
+        try
+        {
+            await conn.ExecuteAsync("ALTER TABLE ObsidianDailyNotes ADD COLUMN ContentHash TEXT NULL;");
         }
         catch
         {
