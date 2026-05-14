@@ -75,7 +75,7 @@ public sealed partial class ObsidianTaskContextIndexer : IObsidianTaskContextInd
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var task in tasks.Where(t => IsAgendaStatus(t.Status)))
+        foreach (var task in tasks.Where(HasAgendaStatus))
         {
             foreach (var dateGroup in task.HappensDates.GroupBy(d => d.Date).OrderBy(g => g.Key))
             {
@@ -121,7 +121,7 @@ public sealed partial class ObsidianTaskContextIndexer : IObsidianTaskContextInd
         sb.AppendLine($"Status: {FormatStatus(task.Status)}");
         sb.AppendLine($"Source: {task.RelativePath}:{task.LineNumber}");
 
-        var allDates = task.AllDates
+        var allDates = task.AllDatesIncludingChildren
             .OrderBy(d => d.Date)
             .ThenBy(d => d.Kind)
             .Select(d => $"{FormatDateKind(d.Kind)} {d.Date:yyyy-MM-dd}")
@@ -148,7 +148,31 @@ public sealed partial class ObsidianTaskContextIndexer : IObsidianTaskContextInd
             sb.AppendLine($"Recurrence: {task.Recurrence}");
         }
 
+        if (task.Children.Count > 0)
+        {
+            sb.AppendLine("Subtasks:");
+            AppendSubtasks(sb, task.Children, depth: 1);
+        }
+
         return sb.ToString().Trim();
+    }
+
+    private static void AppendSubtasks(StringBuilder sb, IEnumerable<ObsidianTaskLine> children, int depth)
+    {
+        foreach (var child in children)
+        {
+            sb.Append(new string(' ', depth * 2));
+            sb.Append("- [");
+            sb.Append(FormatMarker(child.Status));
+            sb.Append("] ");
+            sb.AppendLine(child.Text);
+            AppendSubtasks(sb, child.Children, depth + 1);
+        }
+    }
+
+    private static bool HasAgendaStatus(ObsidianTaskLine task)
+    {
+        return IsAgendaStatus(task.Status) || task.Children.Any(HasAgendaStatus);
     }
 
     private static bool IsAgendaStatus(ObsidianTaskStatus status)
@@ -196,6 +220,24 @@ public sealed partial class ObsidianTaskContextIndexer : IObsidianTaskContextInd
         };
     }
 
+    private static string FormatMarker(ObsidianTaskStatus status)
+    {
+        return status switch
+        {
+            ObsidianTaskStatus.Completed => "x",
+            ObsidianTaskStatus.Pending => " ",
+            ObsidianTaskStatus.InQuestion => "?",
+            ObsidianTaskStatus.PartiallyComplete => "/",
+            ObsidianTaskStatus.Rescheduled => ">",
+            ObsidianTaskStatus.Cancelled => "-",
+            ObsidianTaskStatus.Starred => "*",
+            ObsidianTaskStatus.Attention => "!",
+            ObsidianTaskStatus.Information => "i",
+            ObsidianTaskStatus.Idea => "I",
+            _ => " "
+        };
+    }
+
     private static string FormatDateKind(ObsidianTaskDateKind kind)
     {
         return kind switch
@@ -218,7 +260,7 @@ public sealed partial class ObsidianTaskContextIndexer : IObsidianTaskContextInd
 internal static partial class ObsidianTasksParser
 {
     private static readonly Regex TaskLineRegex = new(
-        @"^\s*[-*+]\s+\[(?<marker>[ xX?/>\-*!iI])\]\s+(?<text>.+?)\s*$",
+        @"^(?<indent>[ \t]*)[-*+]\s+\[(?<marker>[ xX?/>\-*!iI])\]\s+(?<text>.+?)\s*$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex DateRegex = new(
@@ -237,9 +279,14 @@ internal static partial class ObsidianTasksParser
         @"\s+\^[A-Za-z0-9_-]+\s*$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    private static readonly Regex TaskTagRegex = new(
+        @"(?<![\p{L}\p{Nd}_/-])#task(?![\p{L}\p{Nd}_/-])",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     public static IReadOnlyList<ObsidianTaskLine> Parse(string content, string relativePath)
     {
         var tasks = new List<ObsidianTaskLine>();
+        var stack = new List<ObsidianTaskLine>();
         var noteDate = TryParseNoteDate(relativePath);
         var inCodeFence = false;
         var lines = content.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
@@ -277,14 +324,31 @@ internal static partial class ObsidianTasksParser
                 continue;
             }
 
-            tasks.Add(new ObsidianTaskLine(
+            var task = new ObsidianTaskLine(
                 RelativePath: relativePath,
                 LineNumber: i + 1,
                 Text: cleanText,
                 Status: ParseStatus(match.Groups["marker"].Value),
                 AllDates: allDates,
                 NoteDate: noteDate,
-                Recurrence: recurrence));
+                Recurrence: recurrence,
+                Indent: MeasureIndent(match.Groups["indent"].Value));
+
+            while (stack.Count > 0 && stack[^1].Indent >= task.Indent)
+            {
+                stack.RemoveAt(stack.Count - 1);
+            }
+
+            if (stack.Count == 0)
+            {
+                tasks.Add(task);
+            }
+            else
+            {
+                stack[^1].Children.Add(task);
+            }
+
+            stack.Add(task);
         }
 
         return tasks;
@@ -315,7 +379,19 @@ internal static partial class ObsidianTasksParser
         cleaned = RecurrenceRegex.Replace(cleaned, "");
         cleaned = PriorityRegex.Replace(cleaned, "");
         cleaned = BlockIdRegex.Replace(cleaned, "");
+        cleaned = TaskTagRegex.Replace(cleaned, " ");
         return CollapseWhitespaceRegex().Replace(cleaned, " ").Trim();
+    }
+
+    private static int MeasureIndent(string indent)
+    {
+        var width = 0;
+        foreach (var ch in indent)
+        {
+            width += ch == '\t' ? 4 : 1;
+        }
+
+        return width;
     }
 
     private static IEnumerable<ObsidianTaskDate> ExtractDates(string text)
@@ -399,13 +475,19 @@ internal sealed record ObsidianTaskLine(
     ObsidianTaskStatus Status,
     IReadOnlyList<ObsidianTaskDate> AllDates,
     DateOnly? NoteDate,
-    string? Recurrence)
+    string? Recurrence,
+    int Indent)
 {
+    public List<ObsidianTaskLine> Children { get; } = new();
+
+    public IEnumerable<ObsidianTaskDate> AllDatesIncludingChildren =>
+        AllDates.Concat(Children.SelectMany(c => c.AllDatesIncludingChildren));
+
     public IEnumerable<ObsidianTaskDate> HappensDates
     {
         get
         {
-            var explicitHappens = AllDates
+            var explicitHappens = AllDatesIncludingChildren
                 .Where(d => d.Kind is ObsidianTaskDateKind.Due
                     or ObsidianTaskDateKind.Scheduled
                     or ObsidianTaskDateKind.Start)

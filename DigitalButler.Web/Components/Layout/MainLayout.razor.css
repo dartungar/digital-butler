@@ -27,8 +27,9 @@ main {
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
+    flex-wrap: wrap;
     padding: 0.75rem 1.25rem;
-    background: rgba(248, 250, 252, 0.86);
+    background: var(--db-topbar-bg);
     border-bottom: 1px solid var(--db-border);
     backdrop-filter: blur(18px);
 }
@@ -53,6 +54,14 @@ main {
     font-weight: 700;
 }
 
+.topbar-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+}
+
 .topbar-status {
     display: inline-flex;
     align-items: center;
@@ -61,7 +70,7 @@ main {
     color: var(--db-muted-strong);
     font-size: 0.84rem;
     font-weight: 650;
-    background: #ffffff;
+    background: var(--db-elevated);
     border: 1px solid var(--db-border);
     border-radius: 999px;
     box-shadow: var(--db-shadow-xs);
@@ -79,6 +88,11 @@ main {
 @media (max-width: 640.98px) {
     .top-row {
         padding: 0.75rem 1rem;
+    }
+
+    .topbar-actions {
+        justify-content: flex-start;
+        width: 100%;
     }
 
     .topbar-status {

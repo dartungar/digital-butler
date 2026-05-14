@@ -1,0 +1,245 @@
+@page "/admin"
+@page "/control-room"
+@using DigitalButler.Context
+@inject ContextService ContextService
+@inject InstructionService InstructionService
+@inject ISummarizationService Summarizer
+@inject TimeZoneService TimeZoneService
+
+<PageTitle>Control Room</PageTitle>
+
+<PageHeader Title="Control Room" Subtitle="Admin tools, summaries, syncs, and the freshest context Butler has collected." Eyebrow="Admin">
+    <Actions>
+        <a class="button is-link is-light" href="/context/all">View Context</a>
+        <a class="button is-primary" href="/context/sync">Sync Sources</a>
+    </Actions>
+</PageHeader>
+
+<div class="metric-grid">
+    <div class="metric-card">
+        <div class="metric-label">Recent Items</div>
+        <div class="metric-value">@(_recent?.Count ?? 0)</div>
+        <div class="metric-note">Loaded from the latest context window.</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Sources</div>
+        <div class="metric-value">@(_recent?.Select(x => x.Source).Distinct().Count() ?? 0)</div>
+        <div class="metric-note">Distinct sources represented below.</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Timezone</div>
+        <div class="metric-value">@((_currentTimezone ?? "Loading").Split('/').Last())</div>
+        <div class="metric-note">@(_currentTimezone ?? "Loading timezone settings...")</div>
+    </div>
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Timezone</h5>
+        <p class="subtitle is-6">Set the timezone for schedules and summaries.</p>
+    </div>
+
+    <EditForm Model="this" OnValidSubmit="SaveTimezoneAsync">
+        <div class="columns">
+            <div class="column is-one-third">
+                <div class="field">
+                    <div class="control">
+                        <InputText class="input" @bind-Value="_timezoneId" placeholder="e.g. Europe/Prague, America/New_York, UTC" />
+                    </div>
+                    <p class="help">Current: <strong>@(_currentTimezone ?? "Loading...")</strong></p>
+                </div>
+            </div>
+            <div class="column">
+                <button class="button is-primary" type="submit" disabled="@_savingTimezone">Save Timezone</button>
+            </div>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_timezoneMessage))
+        {
+            <div class="notification @(_timezoneError ? "is-danger" : "is-info") is-light">@_timezoneMessage</div>
+        }
+    </EditForm>
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Test Summaries</h5>
+        <p class="subtitle is-6">Run summary prompts on demand without waiting for the schedule.</p>
+    </div>
+    <div class="buttons">
+        <button class="button is-primary is-light" type="button" disabled="@_dailyRunning" @onclick="RunDailySummaryAsync">
+            <UiIcon Name="play" />
+            @if (_dailyRunning)
+            {
+                <span>Daily...</span>
+            }
+            else
+            {
+                <span>Test Daily</span>
+            }
+        </button>
+
+        <button class="button is-primary is-light" type="button" disabled="@_weeklyRunning" @onclick="RunWeeklySummaryAsync">
+            <UiIcon Name="play" />
+            @if (_weeklyRunning)
+            {
+                <span>Weekly...</span>
+            }
+            else
+            {
+                <span>Test Weekly</span>
+            }
+        </button>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_summaryMessage))
+    {
+        <div class="notification is-info is-light" style="white-space:pre-wrap; overflow-wrap:anywhere;">@_summaryMessage</div>
+    }
+</div>
+
+<div class="box">
+    <div class="content">
+        <h5 class="title is-5">Recent Context</h5>
+        <p class="subtitle is-6"><a href="/context/all">View all context</a> | <a href="/context/sync">Sync logs</a></p>
+    </div>
+    @if (_recent is null)
+    {
+        <div class="loading-state">Loading recent context...</div>
+    }
+    else if (_recent.Count == 0)
+    {
+        <div class="empty-state">No context yet. Run a sync to start filling the workspace.</div>
+    }
+    else
+    {
+        <div class="table-container">
+            <table class="table is-fullwidth is-striped is-hoverable is-narrow">
+                <thead><tr><th>Source</th><th>Title</th><th>Updated</th></tr></thead>
+                <tbody>
+                @foreach (var item in _recent.Take(10))
+                {
+                    <tr>
+                        <td style="white-space:nowrap;">@item.Source</td>
+                        <td>@item.Title</td>
+                        <td style="white-space:nowrap;">@item.UpdatedAt.LocalDateTime</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private List<ContextItem>? _recent;
+
+    private string _timezoneId = string.Empty;
+    private string? _currentTimezone;
+    private bool _savingTimezone;
+    private string? _timezoneMessage;
+    private bool _timezoneError;
+
+    private bool _dailyRunning;
+    private bool _weeklyRunning;
+    private string? _summaryMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _recent = await ContextService.GetRecentAsync(take: 20);
+        _currentTimezone = (await TimeZoneService.GetTimeZoneInfoAsync()).Id;
+        _timezoneId = _currentTimezone;
+    }
+
+    private async Task SaveTimezoneAsync()
+    {
+        _savingTimezone = true;
+        _timezoneMessage = null;
+        _timezoneError = false;
+        try
+        {
+            await TimeZoneService.SetTimeZoneIdAsync(_timezoneId);
+            _currentTimezone = (await TimeZoneService.GetTimeZoneInfoAsync()).Id;
+            _timezoneMessage = "Timezone saved.";
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            _timezoneMessage = $"Unknown timezone: {_timezoneId}";
+            _timezoneError = true;
+        }
+        catch (InvalidTimeZoneException)
+        {
+            _timezoneMessage = $"Invalid timezone: {_timezoneId}";
+            _timezoneError = true;
+        }
+        finally
+        {
+            _savingTimezone = false;
+        }
+    }
+
+    private async Task RunDailySummaryAsync()
+    {
+        _dailyRunning = true;
+        _summaryMessage = null;
+        try
+        {
+            var tz = await TimeZoneService.GetTimeZoneInfoAsync();
+            var items = await GetDailyItemsAsync(tz);
+            var sources = items.Select(x => x.Source).Distinct().ToArray();
+            var instructionsBySource = await InstructionService.GetBySourcesAsync(sources);
+            var summary = await Summarizer.SummarizeAsync(items, instructionsBySource, "on-demand-daily", skillInstructions: null, ct: CancellationToken.None);
+            _summaryMessage = string.IsNullOrWhiteSpace(summary) ? "No summary available." : summary;
+        }
+        finally
+        {
+            _dailyRunning = false;
+        }
+    }
+
+    private async Task RunWeeklySummaryAsync()
+    {
+        _weeklyRunning = true;
+        _summaryMessage = null;
+        try
+        {
+            var tz = await TimeZoneService.GetTimeZoneInfoAsync();
+            var items = await GetWeeklyItemsAsync(tz);
+            var sources = items.Select(x => x.Source).Distinct().ToArray();
+            var instructionsBySource = await InstructionService.GetBySourcesAsync(sources);
+            var summary = await Summarizer.SummarizeAsync(items, instructionsBySource, "on-demand-weekly", skillInstructions: null, ct: CancellationToken.None);
+            _summaryMessage = string.IsNullOrWhiteSpace(summary) ? "No summary available." : summary;
+        }
+        finally
+        {
+            _weeklyRunning = false;
+        }
+    }
+
+    private Task<List<ContextItem>> GetDailyItemsAsync(TimeZoneInfo tz)
+    {
+        var nowUtc = DateTimeOffset.UtcNow;
+        var localNow = TimeZoneInfo.ConvertTime(nowUtc, tz);
+
+        var localStart = new DateTime(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, DateTimeKind.Unspecified);
+        var startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, tz);
+        var endUtc = TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), tz);
+
+        return ContextService.GetForWindowAsync(new DateTimeOffset(startUtc, TimeSpan.Zero), new DateTimeOffset(endUtc, TimeSpan.Zero), take: 300);
+    }
+
+    private Task<List<ContextItem>> GetWeeklyItemsAsync(TimeZoneInfo tz)
+    {
+        var nowUtc = DateTimeOffset.UtcNow;
+        var localNow = TimeZoneInfo.ConvertTime(nowUtc, tz);
+
+        var localTodayStart = new DateTime(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, DateTimeKind.Unspecified);
+        var diff = ((7 + (int)localNow.DayOfWeek - (int)DayOfWeek.Monday) % 7);
+        var localWeekStart = localTodayStart.AddDays(-diff);
+        var localWeekEnd = localWeekStart.AddDays(7);
+
+        var weekStartUtc = TimeZoneInfo.ConvertTimeToUtc(localWeekStart, tz);
+        var weekEndUtc = TimeZoneInfo.ConvertTimeToUtc(localWeekEnd, tz);
+
+        return ContextService.GetForWindowAsync(new DateTimeOffset(weekStartUtc, TimeSpan.Zero), new DateTimeOffset(weekEndUtc, TimeSpan.Zero), take: 500);
+    }
+}

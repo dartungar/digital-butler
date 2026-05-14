@@ -1,0 +1,98 @@
+@using System.Text.Json.Serialization
+@inject IJSRuntime JS
+
+<div class="theme-switcher" role="group" aria-label="Theme">
+    @foreach (var option in Options)
+    {
+        <button class="@GetButtonClass(option.Mode)"
+                type="button"
+                title="@option.Title"
+                aria-label="@option.Title"
+                aria-pressed="@GetAriaPressed(option.Mode)"
+                disabled="@IsOptionDisabled(option.Mode)"
+                @onclick="() => SetThemeAsync(option.Mode)">
+            <UiIcon Name="@option.Icon" />
+            <span>@option.Label</span>
+        </button>
+    }
+</div>
+
+@code {
+    private static readonly ThemeOption[] Options =
+    [
+        new("light", "sun", "Light", "Use light theme"),
+        new("dark", "moon", "Dark", "Use dark theme"),
+        new("system", "monitor", "System", "Match the system theme")
+    ];
+
+    private string _mode = "system";
+    private bool _ready;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            var state = await JS.InvokeAsync<ThemeState>("digitalButlerTheme.getTheme");
+            _mode = NormalizeMode(state.Mode);
+        }
+        catch (JSException)
+        {
+            _mode = "system";
+        }
+
+        _ready = true;
+        StateHasChanged();
+    }
+
+    private async Task SetThemeAsync(string mode)
+    {
+        _mode = NormalizeMode(mode);
+
+        try
+        {
+            var state = await JS.InvokeAsync<ThemeState>("digitalButlerTheme.setTheme", _mode);
+            _mode = NormalizeMode(state.Mode);
+        }
+        catch (JSException)
+        {
+            // Keep the optimistic UI state if JS interop is temporarily unavailable.
+        }
+    }
+
+    private string GetButtonClass(string mode)
+    {
+        return _mode == mode
+            ? "theme-switcher__button is-active"
+            : "theme-switcher__button";
+    }
+
+    private bool IsOptionDisabled(string mode)
+    {
+        return !_ready && mode != "system";
+    }
+
+    private string GetAriaPressed(string mode)
+    {
+        return _mode == mode ? "true" : "false";
+    }
+
+    private static string NormalizeMode(string? mode)
+    {
+        return mode is "light" or "dark" or "system"
+            ? mode
+            : "system";
+    }
+
+    private sealed record ThemeOption(string Mode, string Icon, string Label, string Title);
+
+    private sealed class ThemeState
+    {
+        [JsonPropertyName("mode")]
+        public string? Mode { get; set; }
+    }
+}
