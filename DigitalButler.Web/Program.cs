@@ -319,6 +319,7 @@ app.MapGet("/login", (HttpContext http, IAntiforgery antiforgery, IWebHostEnviro
         var tokens = antiforgery.GetAndStoreTokens(http);
         var antiforgeryFieldName = HtmlEncoder.Default.Encode(tokens.FormFieldName);
         var antiforgeryToken = HtmlEncoder.Default.Encode(tokens.RequestToken ?? string.Empty);
+        var themeJsHref = AppendStaticAssetVersion(environment, "theme.js");
         var bulmaCssHref = AppendStaticAssetVersion(environment, "lib/bulma/bulma.min.css");
         var appCssHref = AppendStaticAssetVersion(environment, "app.css");
         var scopedCssHref = AppendStaticAssetVersion(environment, "DigitalButler.Web.styles.css");
@@ -330,6 +331,7 @@ app.MapGet("/login", (HttpContext http, IAntiforgery antiforgery, IWebHostEnviro
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Login</title>
+    <script src="{{themeJsHref}}"></script>
     <link rel="stylesheet" href="{{bulmaCssHref}}" />
     <link rel="stylesheet" href="{{appCssHref}}" />
     <link rel="stylesheet" href="{{scopedCssHref}}" />
