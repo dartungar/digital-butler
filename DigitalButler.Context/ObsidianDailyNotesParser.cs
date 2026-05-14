@@ -17,9 +17,9 @@ public static class ObsidianDailyNotesParser
     // Matches various checkbox types: [ ] pending, [x]/[X] completed, [?] in question,
     // [/] partially complete, [>] rescheduled, [-] cancelled, [*] starred,
     // [!] attention, [i] information, [I] idea
-    private static readonly Regex CheckboxRegex = new(
-        @"^-\s*\[([ xX?/>\-\*!iI])\]\s*(.+)$",
-        RegexOptions.Multiline | RegexOptions.Compiled);
+    private static readonly Regex TaskLineRegex = new(
+        @"^(?<indent>[ \t]*)[-*+]\s*\[(?<marker>[ xX?/>\-\*!iI])\]\s*(?<text>.+)$",
+        RegexOptions.Multiline | RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex InlineTagRegex = new(
         @"#([a-zA-Z0-9_/-]+)",
@@ -32,6 +32,14 @@ public static class ObsidianDailyNotesParser
     private static readonly Regex MarkdownListMarkerRegex = new(
         @"^\s*[-*+]\s*(?:\[[^\]]+\]\s*)?",
         RegexOptions.Compiled);
+
+    private static readonly Regex TaskTagRegex = new(
+        @"(?<![\p{L}\p{Nd}_/-])#task(?![\p{L}\p{Nd}_/-])",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static readonly Regex CollapseWhitespaceRegex = new(
+        @"\s+",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly IDeserializer YamlDeserializer = new DeserializerBuilder()
         .WithNamingConvention(HyphenatedNamingConvention.Instance)
@@ -167,16 +175,10 @@ public static class ObsidianDailyNotesParser
         var informationTasks = new List<string>();
         var ideaTasks = new List<string>();
 
-        foreach (Match match in CheckboxRegex.Matches(cleanedBody))
+        foreach (var task in ParseTaskHierarchy(cleanedBody))
         {
-            var marker = match.Groups[1].Value;
-            var taskText = match.Groups[2].Value.Trim();
-
-            if (string.IsNullOrWhiteSpace(taskText))
-                continue;
-
-            var status = ParseTaskStatus(marker);
-            switch (status)
+            var taskText = FormatTaskWithSubtasks(task);
+            switch (task.Status)
             {
                 case ObsidianTaskStatus.Completed:
                     completedTasks.Add(taskText);
@@ -253,6 +255,83 @@ public static class ObsidianDailyNotesParser
 
             note.Notes = HasMeaningfulJournalText(cleanJournal) ? cleanJournal : null;
         }
+    }
+
+    private static List<ParsedTaskLine> ParseTaskHierarchy(string body)
+    {
+        var topLevelTasks = new List<ParsedTaskLine>();
+        var stack = new List<ParsedTaskLine>();
+
+        foreach (Match match in TaskLineRegex.Matches(body))
+        {
+            var cleanText = CleanTaskTitle(match.Groups["text"].Value);
+            if (string.IsNullOrWhiteSpace(cleanText))
+            {
+                continue;
+            }
+
+            var task = new ParsedTaskLine(
+                indent: MeasureIndent(match.Groups["indent"].Value),
+                marker: match.Groups["marker"].Value,
+                text: cleanText,
+                status: ParseTaskStatus(match.Groups["marker"].Value));
+
+            while (stack.Count > 0 && stack[^1].Indent >= task.Indent)
+            {
+                stack.RemoveAt(stack.Count - 1);
+            }
+
+            if (stack.Count == 0)
+            {
+                topLevelTasks.Add(task);
+            }
+            else
+            {
+                stack[^1].Children.Add(task);
+            }
+
+            stack.Add(task);
+        }
+
+        return topLevelTasks;
+    }
+
+    private static string FormatTaskWithSubtasks(ParsedTaskLine task)
+    {
+        var sb = new StringBuilder(task.Text);
+        AppendSubtasks(sb, task.Children, depth: 1);
+        return sb.ToString();
+    }
+
+    private static void AppendSubtasks(StringBuilder sb, IEnumerable<ParsedTaskLine> children, int depth)
+    {
+        foreach (var child in children)
+        {
+            sb.AppendLine();
+            sb.Append(new string(' ', depth * 2));
+            sb.Append("- [");
+            sb.Append(child.Marker);
+            sb.Append("] ");
+            sb.Append(child.Text);
+            AppendSubtasks(sb, child.Children, depth + 1);
+        }
+    }
+
+    private static string CleanTaskTitle(string text)
+    {
+        var cleaned = TaskTagRegex.Replace(text, " ");
+        return CollapseWhitespaceRegex.Replace(cleaned, " ").Trim();
+    }
+
+    private static int MeasureIndent(string indent)
+    {
+        var width = 0;
+        foreach (var ch in indent)
+        {
+            width += ch == '\t' ? 4 : 1;
+        }
+
+        return width;
     }
 
     private static string? ExtractJournalSection(string body)
@@ -481,5 +560,22 @@ public static class ObsidianDailyNotesParser
             "I" => ObsidianTaskStatus.Idea,
             _ => ObsidianTaskStatus.Pending // Default to pending for unknown markers
         };
+    }
+
+    private sealed class ParsedTaskLine
+    {
+        public ParsedTaskLine(int indent, string marker, string text, ObsidianTaskStatus status)
+        {
+            Indent = indent;
+            Marker = marker;
+            Text = text;
+            Status = status;
+        }
+
+        public int Indent { get; }
+        public string Marker { get; }
+        public string Text { get; }
+        public ObsidianTaskStatus Status { get; }
+        public List<ParsedTaskLine> Children { get; } = new();
     }
 }

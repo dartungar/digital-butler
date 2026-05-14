@@ -14,9 +14,14 @@
 
 <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
     <aside class="menu">
-        <p class="menu-label">Admin</p>
+        <p class="menu-label">Daily</p>
         <ul class="menu-list">
             <li><NavLink href="/" Match="NavLinkMatch.All" ActiveClass="is-active"><UiIcon Name="home" />Dashboard</NavLink></li>
+        </ul>
+
+        <p class="menu-label">Admin</p>
+        <ul class="menu-list">
+            <li><NavLink href="/admin" ActiveClass="is-active"><UiIcon Name="settings" />Control Room</NavLink></li>
         </ul>
 
         <p class="menu-label">Context</p>

@@ -1,244 +1,1080 @@
 @page "/"
+@using System.Globalization
+@using System.Text
+@using System.Text.RegularExpressions
 @using DigitalButler.Context
+@using Microsoft.Extensions.Options
 @inject ContextService ContextService
-@inject InstructionService InstructionService
-@inject ISummarizationService Summarizer
+@inject ObsidianDailyNotesRepository NotesRepo
 @inject TimeZoneService TimeZoneService
+@inject IOptionsSnapshot<ObsidianOptions> ObsidianOptionsSnapshot
 
 <PageTitle>Dashboard</PageTitle>
 
-<PageHeader Title="Dashboard" Subtitle="Quick access to admin tools, summaries, syncs, and the freshest context Butler has collected." Eyebrow="Admin">
+<PageHeader Title="Dashboard" Subtitle="@SelectedDateLong" Eyebrow="Daily">
     <Actions>
-        <a class="button is-link is-light" href="/context/all">View Context</a>
-        <a class="button is-primary" href="/context/sync">Sync Sources</a>
+        <a class="button is-link is-light" href="@DailyNoteLink" target="_blank" rel="noreferrer">
+            <UiIcon Name="note" />
+            <span>Open Daily Note</span>
+        </a>
+        <a class="button is-primary" href="/context/sync">
+            <UiIcon Name="sync" />
+            <span>Sync Sources</span>
+        </a>
     </Actions>
 </PageHeader>
 
+<div class="command-bar daily-command-bar">
+    <div class="command-bar__group daily-date-controls">
+        <button class="button is-light is-icon" type="button" title="Previous day" aria-label="Previous day" @onclick="() => ShiftDateAsync(-1)">
+            <UiIcon Name="chevron-left" />
+        </button>
+        <div class="field">
+            <div class="control">
+                <input class="input daily-date-input" type="date" value="@SelectedDateValue" @onchange="OnDateChangedAsync" aria-label="Selected date" />
+            </div>
+        </div>
+        <button class="button is-light is-icon" type="button" title="Next day" aria-label="Next day" @onclick="() => ShiftDateAsync(1)">
+            <UiIcon Name="chevron-right" />
+        </button>
+        <button class="button is-link is-light" type="button" @onclick="SelectTodayAsync">Today</button>
+    </div>
+
+    <div class="daily-command-bar__meta">
+        <span>@SelectedDateShort</span>
+        <span>@(_timeZoneId ?? "UTC")</span>
+    </div>
+</div>
+
 <div class="metric-grid">
     <div class="metric-card">
-        <div class="metric-label">Recent Items</div>
-        <div class="metric-value">@(_recent?.Count ?? 0)</div>
-        <div class="metric-note">Loaded from the latest context window.</div>
+        <div class="metric-label">Calendar</div>
+        <div class="metric-value">@_calendarEvents.Count</div>
+        <div class="metric-note">@(_calendarEvents.Count == 1 ? "event" : "events") for selected day.</div>
     </div>
     <div class="metric-card">
-        <div class="metric-label">Sources</div>
-        <div class="metric-value">@(_recent?.Select(x => x.Source).Distinct().Count() ?? 0)</div>
-        <div class="metric-note">Distinct sources represented below.</div>
+        <div class="metric-label">Tasks</div>
+        <div class="metric-value">@_tasks.Count</div>
+        <div class="metric-note">@ActiveTaskCount active, @CompletedTaskCount completed.</div>
     </div>
     <div class="metric-card">
-        <div class="metric-label">Timezone</div>
-        <div class="metric-value">@((_currentTimezone ?? "Loading").Split('/').Last())</div>
-        <div class="metric-note">@(_currentTimezone ?? "Loading timezone settings...")</div>
+        <div class="metric-label">Daily Note</div>
+        <div class="metric-value">@DailyNoteState</div>
+        <div class="metric-note">@DailyNotePath</div>
     </div>
 </div>
 
-<div class="box">
-    <div class="content">
-        <h5 class="title is-5">Timezone</h5>
-        <p class="subtitle is-6">Set the timezone for schedules and summaries.</p>
-    </div>
+@if (!string.IsNullOrWhiteSpace(_loadError))
+{
+    <div class="notification is-danger is-light">@_loadError</div>
+}
 
-    <EditForm Model="this" OnValidSubmit="SaveTimezoneAsync">
-        <div class="columns">
-            <div class="column is-one-third">
-                <div class="field">
-                    <div class="control">
-                        <InputText class="input" @bind-Value="_timezoneId" placeholder="e.g. Europe/Prague, America/New_York, UTC" />
-                    </div>
-                    <p class="help">Current: <strong>@(_currentTimezone ?? "Loading...")</strong></p>
+<div class="daily-grid">
+    <div class="daily-main-stack">
+        <section class="box daily-panel daily-calendar-panel">
+            <div class="daily-panel__header">
+                <div>
+                    <h2 class="daily-panel__title">Calendar Events</h2>
+                    <p class="daily-panel__subtitle">@SelectedDateShort</p>
                 </div>
             </div>
-            <div class="column">
-                <button class="button is-primary" type="submit" disabled="@_savingTimezone">Save Timezone</button>
+
+            @if (_loading)
+            {
+                <div class="loading-state">Loading calendar events...</div>
+            }
+            else if (_calendarEvents.Count == 0)
+            {
+                <div class="empty-state">No calendar events for this day.</div>
+            }
+            else
+            {
+                <div class="timeline-list">
+                    @foreach (var item in _calendarEvents)
+                    {
+                        <article class="timeline-item">
+                            <div class="timeline-item__time">@item.TimeRange</div>
+                            <div class="timeline-item__body">
+                                <h3 class="timeline-item__title">@item.Title</h3>
+                                <div class="timeline-item__meta">
+                                    @if (!string.IsNullOrWhiteSpace(item.CalendarName))
+                                    {
+                                        <span>@item.CalendarName</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(item.Location))
+                                    {
+                                        <span>@item.Location</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(item.MeetLink))
+                                    {
+                                        <a class="timeline-item__link" href="@item.MeetLink" target="_blank" rel="noreferrer">Meet</a>
+                                    }
+                                </div>
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="box daily-panel">
+            <div class="daily-panel__header">
+                <div>
+                    <h2 class="daily-panel__title">Tasks</h2>
+                    <p class="daily-panel__subtitle">Daily note and dated vault tasks</p>
+                </div>
+            </div>
+
+            @if (_loading)
+            {
+                <div class="loading-state">Loading tasks...</div>
+            }
+            else if (_tasks.Count == 0)
+            {
+                <div class="empty-state">No tasks for this day.</div>
+            }
+            else
+            {
+                <div class="task-list">
+                    @foreach (var task in _tasks)
+                    {
+                        <article class="task-row @task.RowClass">
+                            <span class="task-row__marker" aria-hidden="true"></span>
+                            <div class="task-row__body">
+                                <h3 class="task-row__title">@task.Text</h3>
+                                <div class="task-row__meta">
+                                    <span class="tag @task.TagClass">@task.Status</span>
+                                    <span>@task.Source</span>
+                                    @if (!string.IsNullOrWhiteSpace(task.Detail))
+                                    {
+                                        <span>@task.Detail</span>
+                                    }
+                                </div>
+                                @if (task.Subtasks.Count > 0)
+                                {
+                                    <ul class="task-subtask-list">
+                                        @foreach (var subtask in task.Subtasks)
+                                        {
+                                            <li class="task-subtask" style="@GetSubtaskIndentStyle(subtask.Depth)">
+                                                <span class="task-subtask__marker">@subtask.Marker</span>
+                                                <span class="task-subtask__text">@subtask.Text</span>
+                                            </li>
+                                        }
+                                    </ul>
+                                }
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
+        </section>
+    </div>
+
+    <aside class="box daily-panel daily-projects-panel">
+        <div class="daily-panel__header">
+            <div>
+                <h2 class="daily-panel__title">Projects</h2>
+                <p class="daily-panel__subtitle">@_projects.Count active or paused</p>
             </div>
         </div>
-        @if (!string.IsNullOrWhiteSpace(_timezoneMessage))
+
+        @if (_projectsLoading)
         {
-            <div class="notification @(_timezoneError ? "is-danger" : "is-info") is-light">@_timezoneMessage</div>
+            <div class="loading-state">Loading projects...</div>
         }
-    </EditForm>
-</div>
-
-<div class="box">
-    <div class="content">
-        <h5 class="title is-5">Test Summaries</h5>
-        <p class="subtitle is-6">Run summary prompts on demand without waiting for the schedule.</p>
-    </div>
-    <div class="buttons">
-        <button class="button is-primary is-light" type="button" disabled="@_dailyRunning" @onclick="RunDailySummaryAsync">
-            <UiIcon Name="play" />
-            @if (_dailyRunning)
-            {
-                <span>Daily...</span>
-            }
-            else
-            {
-                <span>Test Daily</span>
-            }
-        </button>
-
-        <button class="button is-primary is-light" type="button" disabled="@_weeklyRunning" @onclick="RunWeeklySummaryAsync">
-            <UiIcon Name="play" />
-            @if (_weeklyRunning)
-            {
-                <span>Weekly...</span>
-            }
-            else
-            {
-                <span>Test Weekly</span>
-            }
-        </button>
-    </div>
-
-    @if (!string.IsNullOrWhiteSpace(_summaryMessage))
-    {
-        <div class="notification is-info is-light" style="white-space:pre-wrap; overflow-wrap:anywhere;">@_summaryMessage</div>
-    }
-</div>
-
-<div class="box">
-    <div class="content">
-        <h5 class="title is-5">Recent Context</h5>
-        <p class="subtitle is-6"><a href="/context/all">View all context</a> | <a href="/context/sync">Sync logs</a></p>
-    </div>
-    @if (_recent is null)
-    {
-        <div class="loading-state">Loading recent context...</div>
-    }
-    else if (_recent.Count == 0)
-    {
-        <div class="empty-state">No context yet. Run a sync to start filling the workspace.</div>
-    }
-    else
-    {
-        <div class="table-container">
-            <table class="table is-fullwidth is-striped is-hoverable is-narrow">
-                <thead><tr><th>Source</th><th>Title</th><th>Updated</th></tr></thead>
-                <tbody>
-                @foreach (var item in _recent.Take(10))
+        else if (!string.IsNullOrWhiteSpace(_projectsError))
+        {
+            <div class="notification is-danger is-light">@_projectsError</div>
+        }
+        else if (_projects.Count == 0)
+        {
+            <div class="empty-state">No active projects found.</div>
+        }
+        else
+        {
+            <div class="project-list">
+                @foreach (var project in _projects)
                 {
-                    <tr>
-                        <td style="white-space:nowrap;">@item.Source</td>
-                        <td>@item.Title</td>
-                        <td style="white-space:nowrap;">@item.UpdatedAt.LocalDateTime</td>
-                    </tr>
+                    <a class="project-row" href="@project.Link" target="_blank" rel="noreferrer">
+                        <div class="project-row__body">
+                            <h3 class="project-row__title">@project.Title</h3>
+                            <p class="project-row__path">@project.Path</p>
+                        </div>
+                        <span class="tag @project.StatusClass">@project.StatusLabel</span>
+                    </a>
                 }
-                </tbody>
-            </table>
-        </div>
-    }
+            </div>
+        }
+    </aside>
 </div>
+
+<section class="box daily-note-strip">
+    <div class="daily-note-strip__copy">
+        <h2 class="daily-panel__title">Daily Note</h2>
+        <p>@DailyNotePath</p>
+    </div>
+    <a class="button is-link is-light" href="@DailyNoteLink" target="_blank" rel="noreferrer">
+        <UiIcon Name="note" />
+        <span>Open Daily Note</span>
+    </a>
+</section>
 
 @code {
-    private List<ContextItem>? _recent;
+    private const string CalendarCategory = "Calendar";
+    private const string VaultTasksCategory = "Vault Tasks";
 
-    private string _timezoneId = string.Empty;
-    private string? _currentTimezone;
-    private bool _savingTimezone;
-    private string? _timezoneMessage;
-    private bool _timezoneError;
+    private static readonly Regex SubtaskLineRegex = new(
+        @"^(?<indent>[ \t]*)[-*+]\s+(?:\[(?<marker>[ xX?/>\-*!iI])\]\s*)?(?<text>.+)$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private bool _dailyRunning;
-    private bool _weeklyRunning;
-    private string? _summaryMessage;
+    private static readonly Regex TaskTagRegex = new(
+        @"(?<![\p{L}\p{Nd}_/-])#task(?![\p{L}\p{Nd}_/-])",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static readonly Regex CollapseWhitespaceRegex = new(
+        @"\s+",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private TimeZoneInfo _timeZone = TimeZoneInfo.Utc;
+    private string? _timeZoneId;
+    private DateOnly _selectedDate = DateOnly.FromDateTime(DateTime.Today);
+    private bool _loading = true;
+    private string? _loadError;
+    private ObsidianDailyNote? _dailyNote;
+    private List<DashboardCalendarEvent> _calendarEvents = new();
+    private List<DashboardTask> _tasks = new();
+    private bool _projectsLoading = true;
+    private string? _projectsError;
+    private List<DashboardProject> _projects = new();
+
+    private string SelectedDateValue => _selectedDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    private string SelectedDateLong => _selectedDate.ToDateTime(TimeOnly.MinValue).ToString("dddd, MMMM d, yyyy", CultureInfo.CurrentCulture);
+    private string SelectedDateShort => _selectedDate.ToDateTime(TimeOnly.MinValue).ToString("MMM d, yyyy", CultureInfo.CurrentCulture);
+    private string DailyNoteState => _dailyNote is null ? "Expected" : "Synced";
+    private string DailyNotePath => GetDailyNoteRelativePath();
+    private string DailyNoteLink => BuildDailyNoteUri();
+    private int CompletedTaskCount => _tasks.Count(t => t.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase));
+    private int ActiveTaskCount => _tasks.Count - CompletedTaskCount;
 
     protected override async Task OnInitializedAsync()
     {
-        _recent = await ContextService.GetRecentAsync(take: 20);
-        _currentTimezone = (await TimeZoneService.GetTimeZoneInfoAsync()).Id;
-        _timezoneId = _currentTimezone;
+        _timeZone = await TimeZoneService.GetTimeZoneInfoAsync();
+        _timeZoneId = _timeZone.Id;
+
+        var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, _timeZone);
+        _selectedDate = DateOnly.FromDateTime(localNow.DateTime);
+
+        var projectsTask = LoadProjectsAsync();
+        await LoadSelectedDayAsync();
+        await projectsTask;
     }
 
-    private async Task SaveTimezoneAsync()
+    private async Task OnDateChangedAsync(ChangeEventArgs args)
     {
-        _savingTimezone = true;
-        _timezoneMessage = null;
-        _timezoneError = false;
+        var value = args.Value?.ToString();
+        if (!DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+        {
+            return;
+        }
+
+        await SetSelectedDateAsync(date);
+    }
+
+    private Task ShiftDateAsync(int days)
+    {
+        return SetSelectedDateAsync(_selectedDate.AddDays(days));
+    }
+
+    private Task SelectTodayAsync()
+    {
+        var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, _timeZone);
+        return SetSelectedDateAsync(DateOnly.FromDateTime(localNow.DateTime));
+    }
+
+    private async Task SetSelectedDateAsync(DateOnly date)
+    {
+        if (_selectedDate == date)
+        {
+            return;
+        }
+
+        _selectedDate = date;
+        await LoadSelectedDayAsync();
+    }
+
+    private async Task LoadSelectedDayAsync()
+    {
+        _loading = true;
+        _loadError = null;
+
         try
         {
-            await TimeZoneService.SetTimeZoneIdAsync(_timezoneId);
-            _currentTimezone = (await TimeZoneService.GetTimeZoneInfoAsync()).Id;
-            _timezoneMessage = "Timezone saved.";
+            var windowStart = LocalDateStartUtc(_selectedDate);
+            var windowEnd = LocalDateStartUtc(_selectedDate.AddDays(1));
+            var itemsTask = ContextService.GetForWindowAsync(windowStart, windowEnd, take: 700);
+            var noteTask = NotesRepo.GetByDateAsync(_selectedDate);
+
+            await Task.WhenAll(itemsTask, noteTask);
+
+            var items = await itemsTask;
+            _dailyNote = await noteTask;
+
+            _calendarEvents = items
+                .Where(item => item.Source == ContextSource.GoogleCalendar)
+                .Where(item => string.Equals(item.Category, CalendarCategory, StringComparison.Ordinal))
+                .Where(item => IsInWindow(item, windowStart, windowEnd))
+                .OrderBy(item => item.RelevantDate ?? DateTimeOffset.MaxValue)
+                .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+                .Select(ToCalendarEvent)
+                .ToList();
+
+            var vaultTasks = items
+                .Where(item => item.Source == ContextSource.Obsidian)
+                .Where(item => string.Equals(item.Category, VaultTasksCategory, StringComparison.Ordinal))
+                .Where(item => IsInWindow(item, windowStart, windowEnd))
+                .OrderBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+                .Select(ToVaultTask);
+
+            _tasks = BuildTaskList(_dailyNote, vaultTasks).ToList();
         }
-        catch (TimeZoneNotFoundException)
+        catch (Exception ex)
         {
-            _timezoneMessage = $"Unknown timezone: {_timezoneId}";
-            _timezoneError = true;
-        }
-        catch (InvalidTimeZoneException)
-        {
-            _timezoneMessage = $"Invalid timezone: {_timezoneId}";
-            _timezoneError = true;
+            _calendarEvents = new List<DashboardCalendarEvent>();
+            _tasks = new List<DashboardTask>();
+            _dailyNote = null;
+            _loadError = $"Could not load dashboard data: {ex.Message}";
         }
         finally
         {
-            _savingTimezone = false;
+            _loading = false;
         }
     }
 
-    private async Task RunDailySummaryAsync()
+    private async Task LoadProjectsAsync()
     {
-        _dailyRunning = true;
-        _summaryMessage = null;
+        _projectsLoading = true;
+        _projectsError = null;
+
         try
         {
-            var tz = await TimeZoneService.GetTimeZoneInfoAsync();
-            var items = await GetDailyItemsAsync(tz);
-            var sources = items.Select(x => x.Source).Distinct().ToArray();
-            var instructionsBySource = await InstructionService.GetBySourcesAsync(sources);
-            var summary = await Summarizer.SummarizeAsync(items, instructionsBySource, "on-demand-daily", skillInstructions: null, ct: CancellationToken.None);
-            _summaryMessage = string.IsNullOrWhiteSpace(summary) ? "No summary available." : summary;
+            _projects = await GetProjectNotesAsync();
+        }
+        catch (Exception ex)
+        {
+            _projects = new List<DashboardProject>();
+            _projectsError = $"Could not load projects: {ex.Message}";
         }
         finally
         {
-            _dailyRunning = false;
+            _projectsLoading = false;
         }
     }
 
-    private async Task RunWeeklySummaryAsync()
+    private async Task<List<DashboardProject>> GetProjectNotesAsync()
     {
-        _weeklyRunning = true;
-        _summaryMessage = null;
+        var options = ObsidianOptionsSnapshot.Value;
+        if (string.IsNullOrWhiteSpace(options.VaultPath) || !Directory.Exists(options.VaultPath))
+        {
+            return new List<DashboardProject>();
+        }
+
+        var vaultRoot = Path.GetFullPath(options.VaultPath);
+        var projects = new List<DashboardProject>();
+
+        foreach (var filePath in Directory.EnumerateFiles(vaultRoot, "*.md", SearchOption.AllDirectories))
+        {
+            if (IsExcludedProjectPath(vaultRoot, filePath))
+            {
+                continue;
+            }
+
+            var frontmatter = await TryReadProjectFrontmatterAsync(filePath);
+            if (frontmatter is null || !frontmatter.Tags.Any(IsProjectTag))
+            {
+                continue;
+            }
+
+            var normalizedStatus = NormalizeProjectStatus(frontmatter.Status);
+            if (normalizedStatus is null)
+            {
+                continue;
+            }
+
+            var relativePath = ToVaultRelativePath(filePath);
+            var title = string.IsNullOrWhiteSpace(frontmatter.Title)
+                ? Path.GetFileNameWithoutExtension(filePath)
+                : frontmatter.Title.Trim();
+
+            projects.Add(new DashboardProject(
+                Title: title,
+                StatusLabel: FormatProjectStatus(normalizedStatus),
+                Path: relativePath,
+                Link: BuildObsidianUri(relativePath),
+                StatusClass: ProjectStatusClass(normalizedStatus),
+                SortOrder: normalizedStatus.Equals("in-progress", StringComparison.Ordinal) ? 0 : 1));
+        }
+
+        return projects
+            .OrderBy(project => project.SortOrder)
+            .ThenBy(project => project.Title, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+    }
+
+    private static bool IsExcludedProjectPath(string vaultRoot, string filePath)
+    {
+        var relativePath = Path.GetRelativePath(vaultRoot, filePath).Replace('\\', '/');
+        return relativePath.StartsWith(".obsidian/", StringComparison.OrdinalIgnoreCase)
+            || relativePath.Contains("/.obsidian/", StringComparison.OrdinalIgnoreCase)
+            || relativePath.StartsWith("templates/", StringComparison.OrdinalIgnoreCase)
+            || relativePath.Contains("/templates/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<ProjectFrontmatter?> TryReadProjectFrontmatterAsync(string filePath)
+    {
         try
         {
-            var tz = await TimeZoneService.GetTimeZoneInfoAsync();
-            var items = await GetWeeklyItemsAsync(tz);
-            var sources = items.Select(x => x.Source).Distinct().ToArray();
-            var instructionsBySource = await InstructionService.GetBySourcesAsync(sources);
-            var summary = await Summarizer.SummarizeAsync(items, instructionsBySource, "on-demand-weekly", skillInstructions: null, ct: CancellationToken.None);
-            _summaryMessage = string.IsNullOrWhiteSpace(summary) ? "No summary available." : summary;
+            await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, useAsync: true);
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+
+            var firstLine = await reader.ReadLineAsync();
+            if (!string.Equals(firstLine?.TrimStart('\uFEFF').Trim(), "---", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var lines = new List<string>();
+            while (await reader.ReadLineAsync() is { } line)
+            {
+                if (string.Equals(line.Trim(), "---", StringComparison.Ordinal))
+                {
+                    return ParseProjectFrontmatter(lines);
+                }
+
+                lines.Add(line);
+                if (lines.Count > 250)
+                {
+                    return null;
+                }
+            }
         }
-        finally
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DecoderFallbackException)
         {
-            _weeklyRunning = false;
+            return null;
+        }
+
+        return null;
+    }
+
+    private static ProjectFrontmatter ParseProjectFrontmatter(IReadOnlyList<string> lines)
+    {
+        string? title = null;
+        string? status = null;
+        var tags = new List<string>();
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var line = lines[i];
+            if (string.IsNullOrWhiteSpace(line) || char.IsWhiteSpace(line[0]))
+            {
+                continue;
+            }
+
+            var colonIndex = line.IndexOf(':', StringComparison.Ordinal);
+            if (colonIndex <= 0)
+            {
+                continue;
+            }
+
+            var key = line[..colonIndex].Trim();
+            var value = line[(colonIndex + 1)..].Trim();
+
+            if (key.Equals("title", StringComparison.OrdinalIgnoreCase))
+            {
+                title = NormalizeYamlScalar(value);
+            }
+            else if (key.Equals("status", StringComparison.OrdinalIgnoreCase))
+            {
+                status = NormalizeYamlScalar(value);
+            }
+            else if (key.Equals("tags", StringComparison.OrdinalIgnoreCase) || key.Equals("tag", StringComparison.OrdinalIgnoreCase))
+            {
+                tags.AddRange(ParseYamlValueList(value));
+
+                for (var j = i + 1; j < lines.Count; j++)
+                {
+                    var childLine = lines[j];
+                    if (string.IsNullOrWhiteSpace(childLine))
+                    {
+                        continue;
+                    }
+
+                    if (!char.IsWhiteSpace(childLine[0]))
+                    {
+                        break;
+                    }
+
+                    var trimmedChild = childLine.Trim();
+                    if (trimmedChild.StartsWith("- ", StringComparison.Ordinal))
+                    {
+                        tags.AddRange(ParseYamlValueList(trimmedChild[2..].Trim()));
+                    }
+                    else if (trimmedChild.StartsWith("[", StringComparison.Ordinal))
+                    {
+                        tags.AddRange(ParseYamlValueList(trimmedChild));
+                    }
+                }
+            }
+        }
+
+        return new ProjectFrontmatter(title, status, tags);
+    }
+
+    private static IEnumerable<string> ParseYamlValueList(string value)
+    {
+        var cleaned = StripInlineYamlComment(value).Trim();
+        if (string.IsNullOrWhiteSpace(cleaned))
+        {
+            return Enumerable.Empty<string>();
+        }
+
+        if (cleaned.StartsWith("[", StringComparison.Ordinal) && cleaned.EndsWith("]", StringComparison.Ordinal))
+        {
+            cleaned = cleaned[1..^1];
+        }
+
+        return cleaned
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .SelectMany(SplitYamlTagValue)
+            .Select(NormalizeYamlScalar)
+            .Where(tag => !string.IsNullOrWhiteSpace(tag));
+    }
+
+    private static IEnumerable<string> SplitYamlTagValue(string value)
+    {
+        var trimmed = value.Trim();
+        if (trimmed.Length >= 2 && (trimmed[0] == '"' || trimmed[0] == '\''))
+        {
+            return new[] { trimmed };
+        }
+
+        return trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    private static string NormalizeYamlScalar(string value)
+    {
+        var cleaned = StripInlineYamlComment(value).Trim().TrimEnd(',');
+        if (cleaned.Length >= 2 &&
+            ((cleaned[0] == '"' && cleaned[^1] == '"') || (cleaned[0] == '\'' && cleaned[^1] == '\'')))
+        {
+            cleaned = cleaned[1..^1].Trim();
+        }
+
+        if (cleaned.StartsWith("[[", StringComparison.Ordinal) && cleaned.EndsWith("]]", StringComparison.Ordinal))
+        {
+            cleaned = cleaned[2..^2].Trim();
+        }
+
+        return cleaned.StartsWith("#", StringComparison.Ordinal)
+            ? cleaned[1..].Trim()
+            : cleaned;
+    }
+
+    private static string StripInlineYamlComment(string value)
+    {
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (value[i] == '#' && i > 0 && char.IsWhiteSpace(value[i - 1]))
+            {
+                return value[..i].TrimEnd();
+            }
+        }
+
+        return value;
+    }
+
+    private static bool IsProjectTag(string tag)
+    {
+        return NormalizeYamlScalar(tag).Equals("project", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? NormalizeProjectStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return null;
+        }
+
+        var normalized = NormalizeYamlScalar(status)
+            .Replace('_', '-')
+            .Replace(' ', '-')
+            .ToLowerInvariant();
+
+        return normalized is "in-progress" or "paused"
+            ? normalized
+            : null;
+    }
+
+    private static string FormatProjectStatus(string status)
+    {
+        return status.Equals("in-progress", StringComparison.Ordinal)
+            ? "In progress"
+            : "Paused";
+    }
+
+    private static string ProjectStatusClass(string status)
+    {
+        return status.Equals("paused", StringComparison.Ordinal)
+            ? "is-warning is-light"
+            : "is-success is-light";
+    }
+
+    private DateTimeOffset LocalDateStartUtc(DateOnly date)
+    {
+        var localStart = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(localStart, _timeZone), TimeSpan.Zero);
+    }
+
+    private static bool IsInWindow(ContextItem item, DateTimeOffset windowStart, DateTimeOffset windowEnd)
+    {
+        return item.RelevantDate is { } relevantDate &&
+            relevantDate >= windowStart &&
+            relevantDate < windowEnd;
+    }
+
+    private DashboardCalendarEvent ToCalendarEvent(ContextItem item)
+    {
+        var timeRange = TryExtractCalendarLocalTimeRange(item.Body, out var parsedRange)
+            ? parsedRange
+            : FormatRelevantTime(item.RelevantDate);
+
+        return new DashboardCalendarEvent(
+            Title: item.Title,
+            TimeRange: timeRange,
+            CalendarName: GetBodyLine(item.Body, "Calendar: "),
+            Location: GetBodyLine(item.Body, "Location: "),
+            MeetLink: GetBodyLine(item.Body, "Google Meet: "));
+    }
+
+    private DashboardTask ToVaultTask(ContextItem item)
+    {
+        var reason = GetBodyLine(item.Body, "Agenda reason: ");
+        var status = GetBodyLine(item.Body, "Status: ");
+        var source = GetBodyLine(item.Body, "Source: ");
+
+        var label = string.IsNullOrWhiteSpace(reason)
+            ? "Dated"
+            : CultureInfo.CurrentCulture.TextInfo.ToTitleCase(reason);
+
+        return new DashboardTask(
+            Text: CleanTaskTitle(item.Title),
+            Status: label,
+            Source: "Vault task",
+            Detail: source,
+            TagClass: string.Equals(status, "starred", StringComparison.OrdinalIgnoreCase) ? "is-warning is-light" : "is-info is-light",
+            RowClass: "task-row--vault",
+            SortOrder: 20,
+            Subtasks: ExtractSubtasksFromBody(item.Body));
+    }
+
+    private static IEnumerable<DashboardTask> BuildTaskList(ObsidianDailyNote? note, IEnumerable<DashboardTask> vaultTasks)
+    {
+        var taskIndexes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var tasks = new List<DashboardTask>();
+
+        void Add(string? text, string status, string source, string? detail, string tagClass, string rowClass, int sortOrder, IReadOnlyList<DashboardSubtask>? providedSubtasks = null)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return;
+            }
+
+            var (title, embeddedSubtasks) = SplitTaskText(text);
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                return;
+            }
+
+            var key = NormalizeTaskText(title);
+            var subtasks = CombineSubtasks(embeddedSubtasks, providedSubtasks);
+
+            if (taskIndexes.TryGetValue(key, out var existingIndex))
+            {
+                var existing = tasks[existingIndex];
+                var mergedSubtasks = CombineSubtasks(existing.Subtasks, subtasks);
+                if (mergedSubtasks.Count != existing.Subtasks.Count)
+                {
+                    tasks[existingIndex] = existing with { Subtasks = mergedSubtasks };
+                }
+
+                return;
+            }
+
+            taskIndexes[key] = tasks.Count;
+            tasks.Add(new DashboardTask(title, status, source, detail, tagClass, rowClass, sortOrder, subtasks));
+        }
+
+        if (note is not null)
+        {
+            AddDailyTasks(note.StarredTasks, "Starred", "is-warning is-light", "task-row--attention", 0);
+            AddDailyTasks(note.AttentionTasks, "Attention", "is-danger is-light", "task-row--attention", 1);
+            AddDailyTasks(note.PendingTasks, "Pending", "is-info is-light", "task-row--active", 10);
+            AddDailyTasks(note.InQuestionTasks, "Question", "is-warning is-light", "task-row--active", 11);
+            AddDailyTasks(note.PartiallyCompleteTasks, "Partial", "is-info is-light", "task-row--active", 12);
+        }
+
+        foreach (var task in vaultTasks)
+        {
+            Add(task.Text, task.Status, task.Source, task.Detail, task.TagClass, task.RowClass, task.SortOrder, task.Subtasks);
+        }
+
+        if (note is not null)
+        {
+            AddDailyTasks(note.RescheduledTasks, "Rescheduled", "is-warning is-light", "task-row--muted", 70);
+            AddDailyTasks(note.CompletedTasks, "Completed", "is-success is-light", "task-row--done", 80);
+            AddDailyTasks(note.CancelledTasks, "Cancelled", "is-danger is-light", "task-row--muted", 90);
+            AddDailyTasks(note.InformationTasks, "Info", "is-info is-light", "task-row--muted", 100);
+            AddDailyTasks(note.IdeaTasks, "Idea", "is-info is-light", "task-row--muted", 110);
+        }
+
+        return tasks
+            .OrderBy(task => task.SortOrder)
+            .ThenBy(task => task.Text, StringComparer.OrdinalIgnoreCase);
+
+        void AddDailyTasks(IEnumerable<string>? values, string status, string tagClass, string rowClass, int sortOrder)
+        {
+            if (values is null)
+            {
+                return;
+            }
+
+            foreach (var value in values)
+            {
+                Add(value, status, "Daily note", null, tagClass, rowClass, sortOrder);
+            }
         }
     }
 
-    private Task<List<ContextItem>> GetDailyItemsAsync(TimeZoneInfo tz)
+    private string FormatRelevantTime(DateTimeOffset? relevantDate)
     {
-        var nowUtc = DateTimeOffset.UtcNow;
-        var localNow = TimeZoneInfo.ConvertTime(nowUtc, tz);
+        if (relevantDate is null)
+        {
+            return "Anytime";
+        }
 
-        var localStart = new DateTime(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, DateTimeKind.Unspecified);
-        var startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, tz);
-        var endUtc = TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), tz);
-
-        return ContextService.GetForWindowAsync(new DateTimeOffset(startUtc, TimeSpan.Zero), new DateTimeOffset(endUtc, TimeSpan.Zero), take: 300);
+        var local = TimeZoneInfo.ConvertTime(relevantDate.Value, _timeZone);
+        return local.ToString("HH:mm", CultureInfo.InvariantCulture);
     }
 
-    private Task<List<ContextItem>> GetWeeklyItemsAsync(TimeZoneInfo tz)
+    private static bool TryExtractCalendarLocalTimeRange(string body, out string localTimeRange)
     {
-        var nowUtc = DateTimeOffset.UtcNow;
-        var localNow = TimeZoneInfo.ConvertTime(nowUtc, tz);
+        localTimeRange = string.Empty;
 
-        var localTodayStart = new DateTime(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, DateTimeKind.Unspecified);
-        var diff = ((7 + (int)localNow.DayOfWeek - (int)DayOfWeek.Monday) % 7);
-        var localWeekStart = localTodayStart.AddDays(-diff);
-        var localWeekEnd = localWeekStart.AddDays(7);
+        DateTime? start = null;
+        DateTime? end = null;
 
-        var weekStartUtc = TimeZoneInfo.ConvertTimeToUtc(localWeekStart, tz);
-        var weekEndUtc = TimeZoneInfo.ConvertTimeToUtc(localWeekEnd, tz);
+        foreach (var rawLine in body.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (rawLine.StartsWith("Start: ", StringComparison.Ordinal) && TryParseCalendarLocalDateTime(rawLine[7..], out var parsedStart))
+            {
+                start = parsedStart;
+                continue;
+            }
 
-        return ContextService.GetForWindowAsync(new DateTimeOffset(weekStartUtc, TimeSpan.Zero), new DateTimeOffset(weekEndUtc, TimeSpan.Zero), take: 500);
+            if (rawLine.StartsWith("End: ", StringComparison.Ordinal) && TryParseCalendarLocalDateTime(rawLine[5..], out var parsedEnd))
+            {
+                end = parsedEnd;
+            }
+        }
+
+        if (start is null)
+        {
+            return false;
+        }
+
+        localTimeRange = end is not null
+            ? $"{start.Value:HH:mm}-{end.Value:HH:mm}"
+            : $"{start.Value:HH:mm}";
+
+        return true;
     }
+
+    private static bool TryParseCalendarLocalDateTime(string value, out DateTime parsed)
+    {
+        parsed = default;
+
+        var tzSeparatorIndex = value.IndexOf(" (", StringComparison.Ordinal);
+        var timestamp = tzSeparatorIndex >= 0
+            ? value[..tzSeparatorIndex]
+            : value;
+
+        return DateTime.TryParseExact(
+            timestamp.Trim(),
+            "yyyy-MM-dd HH:mm",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out parsed);
+    }
+
+    private static string? GetBodyLine(string body, string prefix)
+    {
+        foreach (var rawLine in body.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (rawLine.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                var value = rawLine[prefix.Length..].Trim();
+                return string.IsNullOrWhiteSpace(value) ? null : value;
+            }
+        }
+
+        return null;
+    }
+
+    private string BuildDailyNoteUri()
+    {
+        return BuildObsidianUri(DailyNotePath);
+    }
+
+    private string BuildObsidianUri(string file)
+    {
+        var options = ObsidianOptionsSnapshot.Value;
+
+        if (string.IsNullOrWhiteSpace(options.VaultName))
+        {
+            return $"obsidian://open?file={Uri.EscapeDataString(file)}";
+        }
+
+        return $"obsidian://open?vault={Uri.EscapeDataString(options.VaultName)}&file={Uri.EscapeDataString(file)}";
+    }
+
+    private string GetDailyNoteRelativePath()
+    {
+        if (_dailyNote is not null && !string.IsNullOrWhiteSpace(_dailyNote.FilePath))
+        {
+            return ToVaultRelativePath(_dailyNote.FilePath);
+        }
+
+        var options = ObsidianOptionsSnapshot.Value;
+        var directory = Path.GetDirectoryName(options.DailyNotesPattern) ?? string.Empty;
+        var extension = Path.GetExtension(options.DailyNotesPattern);
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            extension = ".md";
+        }
+
+        var fileName = $"{_selectedDate:yyyy-MM-dd}{extension}";
+        return string.IsNullOrWhiteSpace(directory)
+            ? fileName
+            : Path.Combine(directory, fileName).Replace('\\', '/');
+    }
+
+    private string ToVaultRelativePath(string filePath)
+    {
+        var options = ObsidianOptionsSnapshot.Value;
+        if (string.IsNullOrWhiteSpace(options.VaultPath))
+        {
+            return filePath.Replace('\\', '/');
+        }
+
+        try
+        {
+            var vaultRoot = Path.GetFullPath(options.VaultPath);
+            if (!Path.IsPathRooted(filePath))
+            {
+                return filePath.Replace('\\', '/');
+            }
+
+            var fullPath = Path.GetFullPath(filePath);
+            if (fullPath.StartsWith(vaultRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            {
+                return Path.GetRelativePath(vaultRoot, fullPath).Replace('\\', '/');
+            }
+        }
+        catch
+        {
+            return filePath.Replace('\\', '/');
+        }
+
+        return filePath.Replace('\\', '/');
+    }
+
+    private static string NormalizeTaskText(string text)
+    {
+        return CleanTaskTitle(text).ToLowerInvariant();
+    }
+
+    private static IReadOnlyList<DashboardSubtask> CombineSubtasks(IReadOnlyList<DashboardSubtask> first, IReadOnlyList<DashboardSubtask>? second)
+    {
+        if (second is null || second.Count == 0)
+        {
+            return first;
+        }
+
+        if (first.Count == 0)
+        {
+            return second;
+        }
+
+        var result = new List<DashboardSubtask>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var subtask in first.Concat(second))
+        {
+            var key = $"{subtask.Depth}|{subtask.Marker}|{NormalizeTaskText(subtask.Text)}";
+            if (seen.Add(key))
+            {
+                result.Add(subtask);
+            }
+        }
+
+        return result;
+    }
+
+    private static (string Title, IReadOnlyList<DashboardSubtask> Subtasks) SplitTaskText(string text)
+    {
+        var lines = text
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n');
+
+        var title = CleanTaskTitle(lines.FirstOrDefault() ?? string.Empty);
+        var subtasks = ParseSubtaskLines(lines.Skip(1));
+        return (title, subtasks);
+    }
+
+    private static IReadOnlyList<DashboardSubtask> ExtractSubtasksFromBody(string body)
+    {
+        var lines = body
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n');
+
+        var subtaskLines = new List<string>();
+        var inSubtasks = false;
+
+        foreach (var line in lines)
+        {
+            if (string.Equals(line.Trim(), "Subtasks:", StringComparison.Ordinal))
+            {
+                inSubtasks = true;
+                continue;
+            }
+
+            if (!inSubtasks)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            if (!char.IsWhiteSpace(line[0]))
+            {
+                break;
+            }
+
+            subtaskLines.Add(line);
+        }
+
+        return ParseSubtaskLines(subtaskLines);
+    }
+
+    private static IReadOnlyList<DashboardSubtask> ParseSubtaskLines(IEnumerable<string> lines)
+    {
+        var subtasks = new List<DashboardSubtask>();
+
+        foreach (var line in lines)
+        {
+            var match = SubtaskLineRegex.Match(line);
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var text = CleanTaskTitle(match.Groups["text"].Value);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            var marker = match.Groups["marker"].Success && !string.IsNullOrEmpty(match.Groups["marker"].Value)
+                ? $"[{NormalizeMarker(match.Groups["marker"].Value)}]"
+                : "-";
+
+            subtasks.Add(new DashboardSubtask(
+                Text: text,
+                Marker: marker,
+                Depth: Math.Max(1, MeasureIndent(match.Groups["indent"].Value) / 2)));
+        }
+
+        return subtasks;
+    }
+
+    private static string CleanTaskTitle(string text)
+    {
+        var cleaned = TaskTagRegex.Replace(text, " ");
+        return CollapseWhitespaceRegex.Replace(cleaned, " ").Trim();
+    }
+
+    private static string NormalizeMarker(string marker)
+    {
+        return marker switch
+        {
+            "X" => "x",
+            _ => marker
+        };
+    }
+
+    private static int MeasureIndent(string indent)
+    {
+        var width = 0;
+        foreach (var ch in indent)
+        {
+            width += ch == '\t' ? 4 : 1;
+        }
+
+        return width;
+    }
+
+    private static string GetSubtaskIndentStyle(int depth)
+    {
+        var clamped = Math.Clamp(depth, 1, 6);
+        return $"--subtask-depth:{clamped}";
+    }
+
+    private sealed record DashboardCalendarEvent(
+        string Title,
+        string TimeRange,
+        string? CalendarName,
+        string? Location,
+        string? MeetLink);
+
+    private sealed record DashboardTask(
+        string Text,
+        string Status,
+        string Source,
+        string? Detail,
+        string TagClass,
+        string RowClass,
+        int SortOrder,
+        IReadOnlyList<DashboardSubtask> Subtasks);
+
+    private sealed record DashboardSubtask(
+        string Text,
+        string Marker,
+        int Depth);
+
+    private sealed record DashboardProject(
+        string Title,
+        string StatusLabel,
+        string Path,
+        string Link,
+        string StatusClass,
+        int SortOrder);
+
+    private sealed record ProjectFrontmatter(
+        string? Title,
+        string? Status,
+        IReadOnlyList<string> Tags);
 }
